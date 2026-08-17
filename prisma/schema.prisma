@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Money is stored as INTEGER PAISE everywhere (₹1 = 100 paise).
+// Ledgers must not drift, and floats drift. Convert at the UI boundary only
+// via app/utils/money.js (toPaise / fromPaise / formatINR).
+// ---------------------------------------------------------------------------
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}
+
+model AdvanceSettings {
+  id             String  @id @default(cuid())
+  shop           String  @unique
+
+  // Store identity printed on the receipt
+  storeName      String?
+  storeAddress   String?
+  storeCity      String?
+  storeState     String?
+  storePincode   String?
+  storeTel       String?
+  storeEmail     String?
+  storeGstin     String?
+  logoUrl        String?
+
+  // Receipt number series, e.g. ADV-0001/25-26
+  receiptPrefix  String  @default("ADV-")
+  receiptSuffix  String  @default("")
+  nextReceiptNo  Int     @default(1)
+  receiptPadding Int     @default(4)
+
+  // Print
+  pageSize       String  @default("THERMAL80") // THERMAL80 | A5 | A4
+  showLogo       Boolean @default(true)
+  showQr         Boolean @default(false)
+
+  // Reconciliation: comma-separated POS custom payment names that mean
+  // "this order was paid out of an advance".
+  tenderNames    String  @default("Advance Adjusted")
+  autoApply      Boolean @default(true)
+
+  // Receipt copy
+  declarationText String @default("Received with thanks the sum stated above as an advance against future purchase.")
+  termsText       String @default("This advance is adjustable against any future purchase.\nNon-transferable. Valid subject to store policy.")
+  footerText      String @default("This is a computer generated receipt.")
+  poweredByText   String @default("Powered by Advance Receipt Pro")
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model AdvanceReceipt {
+  id            String   @id @default(cuid())
+  shop          String
+  receiptNo     String
+
+  customerId    String   // numeric Shopify customer id (not the GID)
+  customerName  String
+  customerPhone String?
+  customerEmail String?
+
+  amountPaise   Int
+  appliedPaise  Int      @default(0)
+  refundedPaise Int      @default(0)
+
+  mode          String   // CASH | UPI | CARD | BANK | OTHER
+  reference     String?  // UPI txn ref / cheque no / notes
+  note          String?
+  staffName     String?
+
+  // What the advance is *for*. Reference only — this never touches inventory,
+  // never reserves stock, and never creates an order line. It exists so that
+  // months later you can tell what the customer was waiting for.
+  // A product may be listed in Shopify but out of stock, or not listed at all
+  // (productListed = false, only productTitle filled in by hand).
+  productListed       Boolean @default(false)
+  productId           String? // Shopify product id, null when not yet listed
+  productVariantId    String?
+  productTitle        String?
+  productVariantTitle String?
+  productSku          String?
+  productSpec         String? // size, colour, quantity — free text either way
+
+  // PENDING = raised from the POS till and sitting in the cart, but the cashier
+  // hasn't tendered yet. Pending receipts carry no ledger entry and no real
+  // receipt number, so an abandoned cart costs nothing and leaves no gap in
+  // the series.
+  status        String   @default("OPEN") // PENDING | OPEN | PARTIAL | CONSUMED | REFUNDED | VOID
+  receiptDate   DateTime @default(now())
+  voidedAt      DateTime?
+  voidReason    String?
+
+  // Where the advance was taken, and the POS order that collected the money.
+  source        String   @default("ADMIN") // ADMIN | POS
+  posOrderId    String?
+  posOrderName  String?
+  posGateway    String?  // raw tender name POS reported, e.g. "UPI"
+  confirmedAt   DateTime?
+
+  allocations   Allocation[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, receiptNo])
+  @@index([shop, customerId])
+  @@index([shop, status])
+  @@index([shop, receiptDate])
+}
+
+// One draw-down of one receipt against one order.
+model Allocation {
+  id          String   @id @default(cuid())
+  shop        String
+  receiptId   String
+  receipt     AdvanceReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  customerId  String
+  orderId     String
+  orderName   String
+  amountPaise Int
+  source      String   @default("WEBHOOK") // WEBHOOK | MANUAL
+  releasedAt  DateTime?
+  releaseNote String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([shop, orderId])
+  @@index([shop, customerId])
+  @@index([receiptId])
+}
+
+// Append-only journal. Positive = customer credit increases, negative = decreases.
+model LedgerEntry {
+  id           String   @id @default(cuid())
+  shop         String
+  customerId   String
+  customerName String
+
+  // ADVANCE_RECEIVED | ADVANCE_APPLIED | ADVANCE_RELEASED
+  // ADVANCE_REFUNDED | ADVANCE_VOIDED   | ADJUSTMENT
+  type         String
+  amountPaise  Int
+
+  receiptId    String?
+  receiptNo    String?
+  orderId      String?
+  orderName    String?
+  note         String?
+
+  entryDate    DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@index([shop, customerId, entryDate])
+  @@index([shop, entryDate])
+  @@index([shop, type])
+}
+
+// Every order the webhook has looked at — gives an audit trail and prevents
+// double-application when Shopify re-delivers orders/create + orders/paid.
+model ProcessedOrder {
+  id             String   @id @default(cuid())
+  shop           String
+  orderId        String
+  orderName      String
+  customerId     String?
+  customerName   String?
+
+  tenderPaise    Int      @default(0) // amount tendered against the advance gateway
+  allocatedPaise Int      @default(0) // amount actually drawn from receipts
+
+  // MATCHED | PARTIAL | NO_CUSTOMER | NO_BALANCE | NO_TENDER | RELEASED
+  status         String   @default("NO_TENDER")
+  message        String?
+
+  orderDate      DateTime?
+  processedAt    DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([shop, orderId])
+  @@index([shop, status])
+  @@index([shop, processedAt])
+}

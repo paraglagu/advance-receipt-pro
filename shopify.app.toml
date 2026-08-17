@@ -1,0 +1,49 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# NOTE: client_id is filled in by `shopify app config link` after you create the
+# app in the Partner Dashboard. The placeholder below is intentionally blank.
+
+client_id = ""
+name = "Advance Receipt Pro"
+application_url = "https://advance-receipt-pro.onrender.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+dev_store_url = ""
+
+[webhooks]
+api_version = "2025-10"
+
+[[webhooks.subscriptions]]
+topics = [ "orders/create", "orders/updated", "orders/paid" ]
+uri = "/webhooks/orders"
+
+[[webhooks.subscriptions]]
+topics = [ "orders/cancelled" ]
+uri = "/webhooks/orders-cancelled"
+
+[[webhooks.subscriptions]]
+topics = [ "refunds/create" ]
+uri = "/webhooks/refunds"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "/webhooks/app-uninstalled"
+
+[access_scopes]
+# read_orders  – detect the "Advance Adjusted" tender on POS orders
+# read_customers / write_customers – customer lookup + phone/email on receipts
+# read_products – look up what an advance is against (read-only; no inventory writes)
+scopes = "read_orders,read_customers,write_customers,read_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://advance-receipt-pro.onrender.com/auth/callback",
+  "https://advance-receipt-pro.onrender.com/auth/shopify/callback",
+  "https://advance-receipt-pro.onrender.com/api/auth/callback"
+]
+
+[pos]
+embedded = true

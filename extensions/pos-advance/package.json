@@ -1,0 +1,9 @@
+{
+  "name": "pos-advance",
+  "private": true,
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "preact": "^10.24.0"
+  }
+}

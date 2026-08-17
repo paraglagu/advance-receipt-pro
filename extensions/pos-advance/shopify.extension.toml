@@ -1,0 +1,14 @@
+api_version = "2025-10"
+
+[[extensions]]
+name = "Take advance"
+handle = "pos-advance"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  target = "pos.home.tile.render"
+  module = "./src/Tile.jsx"
+
+  [[extensions.targeting]]
+  target = "pos.home.modal.render"
+  module = "./src/Modal.jsx"
