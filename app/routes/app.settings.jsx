@@ -14,7 +14,7 @@ import {
   Text,
   TextField,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { getSettings, saveSettings } from "../models/settings.server";
 import { formatReceiptNo } from "../utils/domain";
@@ -79,6 +79,12 @@ export const action = async ({ request }) => {
   return json({ ok: true });
 };
 
+/**
+ * Every field is controlled from one state object.
+ *
+ * Polaris TextField has no `defaultValue` — it always renders `value`, so an
+ * uncontrolled field sits empty and silently swallows typing.
+ */
 export default function SettingsPage() {
   const { settings } = useLoaderData();
   const actionData = useActionData();
@@ -86,18 +92,46 @@ export default function SettingsPage() {
   const saving = navigation.state === "submitting";
   const errors = actionData?.errors || {};
 
-  const [prefix, setPrefix] = useState(settings.receiptPrefix);
-  const [suffix, setSuffix] = useState(settings.receiptSuffix);
-  const [nextNo, setNextNo] = useState(String(settings.nextReceiptNo));
-  const [padding, setPadding] = useState(String(settings.receiptPadding));
-  const [pageSize, setPageSize] = useState(settings.pageSize);
-  const [showLogo, setShowLogo] = useState(settings.showLogo);
-  const [autoApply, setAutoApply] = useState(settings.autoApply);
-  const [tenderNames, setTenderNames] = useState(settings.tenderNames);
+  const [form, setForm] = useState(() => ({
+    storeName: settings.storeName || "",
+    storeAddress: settings.storeAddress || "",
+    storeCity: settings.storeCity || "",
+    storeState: settings.storeState || "",
+    storePincode: settings.storePincode || "",
+    storeTel: settings.storeTel || "",
+    storeEmail: settings.storeEmail || "",
+    storeGstin: settings.storeGstin || "",
+    logoUrl: settings.logoUrl || "",
+
+    receiptPrefix: settings.receiptPrefix || "",
+    receiptSuffix: settings.receiptSuffix || "",
+    nextReceiptNo: String(settings.nextReceiptNo ?? 1),
+    receiptPadding: String(settings.receiptPadding ?? 4),
+
+    pageSize: settings.pageSize || "THERMAL80",
+    showLogo: Boolean(settings.showLogo),
+
+    tenderNames: settings.tenderNames || "",
+    autoApply: Boolean(settings.autoApply),
+
+    declarationText: settings.declarationText || "",
+    termsText: settings.termsText || "",
+    footerText: settings.footerText || "",
+    poweredByText: settings.poweredByText || "",
+  }));
+
+  const set = useCallback(
+    (key) => (value) => setForm((prev) => ({ ...prev, [key]: value })),
+    [],
+  );
 
   const preview = formatReceiptNo(
-    { receiptPrefix: prefix, receiptSuffix: suffix, receiptPadding: Number(padding) || 4 },
-    Number(nextNo) || 1,
+    {
+      receiptPrefix: form.receiptPrefix,
+      receiptSuffix: form.receiptSuffix,
+      receiptPadding: Number(form.receiptPadding) || 4,
+    },
+    Number(form.nextReceiptNo) || 1,
   );
 
   return (
@@ -129,8 +163,8 @@ export default function SettingsPage() {
                   <TextField
                     label="Custom payment method name(s)"
                     name="tenderNames"
-                    value={tenderNames}
-                    onChange={setTenderNames}
+                    value={form.tenderNames}
+                    onChange={set("tenderNames")}
                     autoComplete="off"
                     error={errors.tenderNames}
                     helpText="Comma-separate if you use more than one name. Matching ignores case."
@@ -138,8 +172,8 @@ export default function SettingsPage() {
                   <Checkbox
                     label="Apply advances automatically when a matching order comes in"
                     name="autoApply"
-                    checked={autoApply}
-                    onChange={setAutoApply}
+                    checked={form.autoApply}
+                    onChange={set("autoApply")}
                     helpText="Turn off only if you want to reconcile every order by hand."
                   />
                 </BlockStack>
@@ -151,22 +185,24 @@ export default function SettingsPage() {
                   <Text as="h2" variant="headingMd">Receipt number series</Text>
                   <InlineGrid columns={{ xs: 1, sm: 4 }} gap="300">
                     <TextField
-                      label="Prefix" name="receiptPrefix" value={prefix}
-                      onChange={setPrefix} autoComplete="off"
+                      label="Prefix" name="receiptPrefix"
+                      value={form.receiptPrefix} onChange={set("receiptPrefix")}
+                      autoComplete="off"
                     />
                     <TextField
-                      label="Next number" name="nextReceiptNo" value={nextNo}
-                      onChange={setNextNo} autoComplete="off" type="number"
-                      error={errors.nextReceiptNo}
+                      label="Next number" name="nextReceiptNo" type="number"
+                      value={form.nextReceiptNo} onChange={set("nextReceiptNo")}
+                      autoComplete="off" error={errors.nextReceiptNo}
                     />
                     <TextField
-                      label="Digits" name="receiptPadding" value={padding}
-                      onChange={setPadding} autoComplete="off" type="number"
-                      error={errors.receiptPadding}
+                      label="Digits" name="receiptPadding" type="number"
+                      value={form.receiptPadding} onChange={set("receiptPadding")}
+                      autoComplete="off" error={errors.receiptPadding}
                     />
                     <TextField
-                      label="Suffix" name="receiptSuffix" value={suffix}
-                      onChange={setSuffix} autoComplete="off" placeholder="/25-26"
+                      label="Suffix" name="receiptSuffix" placeholder="/26-27"
+                      value={form.receiptSuffix} onChange={set("receiptSuffix")}
+                      autoComplete="off"
                     />
                   </InlineGrid>
                   <Text as="p" tone="subdued" variant="bodySm">
@@ -180,21 +216,45 @@ export default function SettingsPage() {
               <Card>
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Store details on the receipt</Text>
-                  <TextField label="Store name" name="storeName" defaultValue={settings.storeName || ""} autoComplete="off" />
-                  <TextField label="Address" name="storeAddress" defaultValue={settings.storeAddress || ""} autoComplete="off" multiline={2} />
+                  <TextField
+                    label="Store name" name="storeName"
+                    value={form.storeName} onChange={set("storeName")} autoComplete="off"
+                  />
+                  <TextField
+                    label="Address" name="storeAddress" multiline={2}
+                    value={form.storeAddress} onChange={set("storeAddress")} autoComplete="off"
+                  />
                   <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
-                    <TextField label="City" name="storeCity" defaultValue={settings.storeCity || ""} autoComplete="off" />
-                    <TextField label="State" name="storeState" defaultValue={settings.storeState || ""} autoComplete="off" />
-                    <TextField label="PIN code" name="storePincode" defaultValue={settings.storePincode || ""} autoComplete="off" />
+                    <TextField
+                      label="City" name="storeCity"
+                      value={form.storeCity} onChange={set("storeCity")} autoComplete="off"
+                    />
+                    <TextField
+                      label="State" name="storeState"
+                      value={form.storeState} onChange={set("storeState")} autoComplete="off"
+                    />
+                    <TextField
+                      label="PIN code" name="storePincode"
+                      value={form.storePincode} onChange={set("storePincode")} autoComplete="off"
+                    />
                   </InlineGrid>
                   <InlineGrid columns={{ xs: 1, sm: 3 }} gap="300">
-                    <TextField label="Phone" name="storeTel" defaultValue={settings.storeTel || ""} autoComplete="off" />
-                    <TextField label="Email" name="storeEmail" defaultValue={settings.storeEmail || ""} autoComplete="off" />
-                    <TextField label="GSTIN" name="storeGstin" defaultValue={settings.storeGstin || ""} autoComplete="off" />
+                    <TextField
+                      label="Phone" name="storeTel"
+                      value={form.storeTel} onChange={set("storeTel")} autoComplete="off"
+                    />
+                    <TextField
+                      label="Email" name="storeEmail"
+                      value={form.storeEmail} onChange={set("storeEmail")} autoComplete="off"
+                    />
+                    <TextField
+                      label="GSTIN" name="storeGstin"
+                      value={form.storeGstin} onChange={set("storeGstin")} autoComplete="off"
+                    />
                   </InlineGrid>
                   <TextField
-                    label="Logo URL" name="logoUrl" defaultValue={settings.logoUrl || ""}
-                    autoComplete="off"
+                    label="Logo URL" name="logoUrl"
+                    value={form.logoUrl} onChange={set("logoUrl")} autoComplete="off"
                     helpText="A public image URL. Upload to Shopify Files and paste the link."
                   />
                 </BlockStack>
@@ -213,14 +273,14 @@ export default function SettingsPage() {
                         { label: "A5 voucher", value: "A5" },
                         { label: "A4 voucher", value: "A4" },
                       ]}
-                      value={pageSize}
-                      onChange={setPageSize}
+                      value={form.pageSize}
+                      onChange={set("pageSize")}
                     />
                     <Checkbox
                       label="Show logo on receipts"
                       name="showLogo"
-                      checked={showLogo}
-                      onChange={setShowLogo}
+                      checked={form.showLogo}
+                      onChange={set("showLogo")}
                     />
                   </InlineGrid>
                   <Text as="p" tone="subdued" variant="bodySm">
@@ -234,20 +294,24 @@ export default function SettingsPage() {
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Receipt wording</Text>
                   <TextField
-                    label="Declaration" name="declarationText"
-                    defaultValue={settings.declarationText || ""} autoComplete="off" multiline={2}
+                    label="Declaration" name="declarationText" multiline={2}
+                    value={form.declarationText} onChange={set("declarationText")}
+                    autoComplete="off"
                   />
                   <TextField
-                    label="Terms" name="termsText"
-                    defaultValue={settings.termsText || ""} autoComplete="off" multiline={3}
+                    label="Terms" name="termsText" multiline={3}
+                    value={form.termsText} onChange={set("termsText")}
+                    autoComplete="off"
                   />
                   <TextField
                     label="Footer" name="footerText"
-                    defaultValue={settings.footerText || ""} autoComplete="off"
+                    value={form.footerText} onChange={set("footerText")}
+                    autoComplete="off"
                   />
                   <TextField
                     label="Powered by line" name="poweredByText"
-                    defaultValue={settings.poweredByText || ""} autoComplete="off"
+                    value={form.poweredByText} onChange={set("poweredByText")}
+                    autoComplete="off"
                   />
                 </BlockStack>
               </Card>
