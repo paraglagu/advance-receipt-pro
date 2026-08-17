@@ -13,7 +13,7 @@ services:
       - key: SHOPIFY_API_SECRET
         sync: false
       - key: SCOPES
-        value: read_orders,read_customers,write_customers,read_products
+        value: read_orders,read_customers,read_products
       - key: SHOPIFY_APP_URL
         sync: false
       - key: DATABASE_URL

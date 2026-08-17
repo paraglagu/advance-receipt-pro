@@ -3,6 +3,7 @@ api_version = "2025-10"
 [[extensions]]
 name = "Take advance"
 handle = "pos-advance"
+uid = "2f4c2d23-90ad-292c-8595-182f135fea075f3b4943"
 type = "ui_extension"
 
   [[extensions.targeting]]

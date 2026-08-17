@@ -112,13 +112,46 @@ From the project folder:
 git init && git add . && git commit -m "Advance Receipt Pro"
 ```
 
-Create an empty repository on github.com (private is fine), then:
+`.gitignore` already excludes `.env`, `node_modules` and the test scaffolding —
+expect around 60 files committed.
+
+Now create the repository at [github.com/new](https://github.com/new):
+
+- Name: `advance-receipt-pro` (Private is fine)
+- **Leave "Add a README file", ".gitignore" and "Choose a licence" all
+  unticked.** Ticking any of them puts a commit on GitHub that your push will
+  collide with.
+
+GitHub then shows a "…or push an existing repository from the command line"
+box containing your real URL. Use that URL below — **replace `YOUR-USERNAME`
+with your actual GitHub username**, don't paste it literally:
 
 ```bash
-git remote add origin https://github.com/<you>/advance-receipt-pro.git && git branch -M main && git push -u origin main
+git remote add origin https://github.com/YOUR-USERNAME/advance-receipt-pro.git
 ```
 
-`.gitignore` already excludes `.env`, `node_modules` and the test scaffolding.
+```bash
+git branch -M main && git push -u origin main
+```
+
+A browser window opens for GitHub sign-in. If the terminal asks for a
+*password* instead, it wants a Personal Access Token — GitHub hasn't accepted
+account passwords for git since 2021. Create one at **GitHub → Settings →
+Developer settings → Personal access tokens → Tokens (classic)** with the
+`repo` scope.
+
+<details>
+<summary>If you already ran <code>git remote add</code> with the wrong URL</summary>
+
+`git remote add` fails if a remote called `origin` already exists, so use
+`set-url` to correct it rather than adding again:
+
+```bash
+git remote set-url origin https://github.com/YOUR-USERNAME/advance-receipt-pro.git
+```
+
+Check it took with `git remote -v`, then push.
+</details>
 
 ## Step 2 — Create the app in Shopify Partners
 
@@ -128,6 +161,36 @@ git remote add origin https://github.com/<you>/advance-receipt-pro.git && git br
 3. Open the app, go to **Configuration**, and copy the **Client ID** and
    **Client secret**. Keep this tab open — you'll need both in Step 4, and you'll
    come back in Step 5.
+
+**You do not set any scopes here.** This app uses Shopify managed installation
+(`use_legacy_install_flow = false`), so access scopes are declared in
+`shopify.app.toml` and registered by `npx shopify app deploy` in Step 5. If you
+go looking for a permissions checklist in the Partner Dashboard, there isn't
+one — that's expected.
+
+### What it asks for, and why
+
+The app issues **no GraphQL mutations at all**. It is entirely read-only against
+Shopify; everything it writes lives in its own database.
+
+| Scope | Why |
+| --- | --- |
+| `read_orders` | Read order tenders, line items, refunds and cart attributes — how advances get confirmed, redeemed and refunded |
+| `read_customers` | Customer lookup for the picker; ledgers key off the customer id |
+| `read_products` | The "what is this advance for?" picker |
+
+**No write scopes, and no inventory access** — the app cannot change stock,
+customers, products or orders even if it tried.
+
+The POS extension's cart actions (`addCustomSale`, `setCustomer`) are POS
+operations, not Admin API calls, so they need no scope of their own.
+
+**One optional change.** `read_orders` only reaches back **60 days**. If you want
+to re-check a reconciliation exception on an older order, swap it for
+`read_all_orders` in `shopify.app.toml` before Step 5. Day-to-day reconciliation
+is webhook-driven and always recent, so the default is fine for most stores —
+`gst-invoice-pro` on this same store already holds `read_all_orders` if you want
+the precedent.
 
 ## Step 3 — Create the database and web service on Render
 
@@ -161,13 +224,26 @@ Click **Manual Deploy → Deploy latest commit**. The build runs
 
 ## Step 5 — Point the app at your URL
 
-Edit three files with your real Render URL, replacing
-`https://advance-receipt-pro.onrender.com`:
+These are already set to `https://advance-receipt-pro.onrender.com`:
 
 - `shopify.app.toml` → `application_url` and all three `redirect_urls`
 - `extensions/pos-advance/src/Modal.jsx` → the `APP_URL` constant at the top
+- `.env.example` → `SHOPIFY_APP_URL` (template only; the live value is the
+  Render environment variable you set in Step 4)
 
-Commit and push. Then link and deploy the app config:
+**If Render gave you a different hostname** — it appends a suffix when the name
+is taken, e.g. `advance-receipt-pro-7m8h.onrender.com` — replace the URL in all
+of the above. Check with:
+
+```bash
+grep -rn "onrender.com" shopify.app.toml extensions/ .env.example
+```
+
+Every hit must show the same hostname as your live Render service. A mismatch in
+`redirect_urls` breaks the install with an OAuth error; a mismatch in `APP_URL`
+makes the POS tile fail to reach the backend.
+
+Then link and deploy the app config:
 
 ```bash
 npm install --legacy-peer-deps
@@ -177,22 +253,65 @@ npm install --legacy-peer-deps
 npx shopify app config link
 ```
 
-Pick the app you created in Step 2. This fills in `client_id` in
-`shopify.app.toml`. Then:
+Pick the app you created in Step 2. This fills in `client_id`.
+
+> ⚠️ **`config link` overwrites `shopify.app.toml` with whatever the remote app
+> has** — which, for a brand-new app, is nothing. It will blank out `scopes`,
+> empty `redirect_urls`, delete every `[[webhooks.subscriptions]]` block and
+> reset `api_version`.
+>
+> **After running it, check the file.** If `scopes = ""` or
+> `redirect_urls = [ ]`, restore them (see the committed version in git:
+> `git diff shopify.app.toml`, or `git checkout shopify.app.toml` then put the
+> new `client_id` back). `config link` pulls; `app deploy` pushes.
+
+With `shopify.app.toml` correct, push it up to Shopify:
 
 ```bash
 npx shopify app deploy
 ```
 
 This registers the access scopes, the webhook subscriptions, and the POS
-extension. Push the config change to GitHub too so Render stays in sync.
+extension.
 
-## Step 6 — Install it on your store
+**Then make sure Render agrees about scopes.** In Render → your service →
+Environment, `SCOPES` must match `shopify.app.toml` exactly:
 
-In the Partner Dashboard: **Apps → Advance Receipt Pro → Test your app →
-Select store**, choose `greatoutdoorsindia.com`, and click through the
-permission screen. It asks for orders, customers and products (read-only for
-products).
+```
+read_orders,read_customers,read_products
+```
+
+If the app requests different scopes than Shopify granted, the library detects
+the mismatch and bounces you through re-authentication on every page load.
+
+Commit and push the config change to GitHub so Render stays in sync.
+
+## Step 6 — Set distribution, then install
+
+### 6a. Choose custom distribution ⚠️ do this before installing
+
+This app is for **one store**, not the public App Store. In the Partner
+Dashboard: **Apps → Advance Receipt Pro → Distribution**, choose
+**Custom distribution**, and enter your store domain
+(`qa0jmi-q7.myshopify.com`).
+
+> **This choice is permanent.** Shopify won't let you switch between custom and
+> public distribution afterwards — you'd have to create a new app. Custom is
+> correct here.
+
+If you skip this, the app stays on App Store distribution, which can only be
+installed on **development** stores. Installing on a live store fails with
+*"The installation link for this app is invalid"*, even though the permission
+screen renders correctly.
+
+The code must agree: `app/shopify.server.js` sets
+`distribution: AppDistribution.SingleMerchant`.
+
+### 6b. Install
+
+Custom distribution gives you a one-click install link on that same
+Distribution page. Open it, review the permissions (orders, customers,
+products — all read-only) and click **Install**.
 
 The app should now open inside your Shopify admin.
 
@@ -242,6 +361,50 @@ Do this once end to end before staff use it:
 
 If step 4 doesn't reconcile, check **Order reconciliation** — it explains why
 (usually no customer on the order).
+
+---
+
+## Troubleshooting
+
+### "The app couldn't be loaded — this app can't load due to an issue with browser cookies"
+
+Shopify shows this generic message whenever the embedded app fails to
+authenticate, and cookies are almost never the real cause.
+
+**Look at the browser address bar first** — the admin appends the real reason,
+e.g. `?oauth_error=same_site_cookies`. That one specific error means the app is
+running the legacy cookie-based OAuth flow inside the iframe. The fix is that
+`app/shopify.server.js` must set:
+
+```js
+future: { unstable_newEmbeddedAuthStrategy: true }
+```
+
+This has to stay in step with `use_legacy_install_flow = false` in
+`shopify.app.toml`. The two together mean "Shopify grants the scopes, the app
+uses token exchange" — no OAuth redirect and no cookies. The library defaults
+this flag to **false**, so it must be set explicitly.
+
+Other causes, in order of likelihood:
+
+1. **Is `shopify.app.toml` intact?** This is the usual culprit right after
+   `shopify app config link`, which blanks the file (see Step 5). If
+   `scopes = ""` or `redirect_urls = [ ]`, restore them and run
+   `npx shopify app deploy`.
+2. **Do the redirect URLs match your live hostname?** All three in
+   `[auth].redirect_urls` must use the exact Render hostname.
+3. **Does Render's `SCOPES` match `shopify.app.toml`?** A mismatch causes an
+   endless re-auth loop.
+4. **Is the service actually up?** Render's free tier sleeps:
+   ```bash
+   curl -o /dev/null -w "%{http_code}\n" https://advance-receipt-pro.onrender.com/auth/login
+   ```
+   `200` means it's serving. Anything else — check Render's logs.
+5. **Only then suspect cookies.** Try an incognito window with third-party
+   cookies allowed, or a different browser.
+
+After fixing config, reload the app from **Shopify admin → Apps**. Managed
+installation will prompt to approve the corrected scopes.
 
 ---
 

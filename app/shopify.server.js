@@ -15,8 +15,29 @@ const shopify = shopifyApp({
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
-  distribution: AppDistribution.AppStore,
+  // Custom distribution: this app is for one store (greatoutdoorsindia), not
+  // the public App Store. AppStore distribution would only allow installing on
+  // *development* stores until the app is listed and approved — on a live store
+  // it fails with "The installation link for this app is invalid".
+  // This must match the Distribution setting in the Partner Dashboard.
+  distribution: AppDistribution.SingleMerchant,
   isEmbeddedApp: true,
+
+  future: {
+    // REQUIRED, and must stay in step with `use_legacy_install_flow = false`
+    // in shopify.app.toml.
+    //
+    // With this off (the library default), an embedded app runs the legacy
+    // cookie-based OAuth redirect. Inside the Shopify admin iframe that cookie
+    // is dropped as a cross-site cookie, so the callback fails and the admin
+    // bounces around before landing on
+    // `?oauth_error=same_site_cookies` — surfaced to the merchant as the
+    // misleading "app can't load due to an issue with browser cookies".
+    //
+    // On, the app uses token exchange instead: no OAuth redirect, no cookies.
+    unstable_newEmbeddedAuthStrategy: true,
+  },
+
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),

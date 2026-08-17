@@ -1,8 +1,10 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
-# NOTE: client_id is filled in by `shopify app config link` after you create the
-# app in the Partner Dashboard. The placeholder below is intentionally blank.
+#
+# NOTE: `shopify app config link` PULLS the remote app's config and overwrites
+# this file. If it ever blanks out scopes / redirect_urls / webhooks again,
+# restore them here and run `npx shopify app deploy` to PUSH them back up.
 
-client_id = ""
+client_id = "96fe46282c2ee4bb9c79ce46a57187f5"
 name = "Advance Receipt Pro"
 application_url = "https://advance-receipt-pro.onrender.com"
 embedded = true
@@ -10,6 +12,29 @@ embedded = true
 [build]
 automatically_update_urls_on_dev = false
 dev_store_url = ""
+
+[access_scopes]
+# This app is read-only against the Admin API — it issues no mutations at all.
+# Everything it writes lives in its own database.
+#
+# read_orders    – order tenders, line items, refunds and cart attributes, so
+#                  advances can be confirmed, redeemed and refunded
+# read_customers – customer lookup for the picker; ledgers key off customer id
+# read_products  – "what is this advance for?" picker. Read-only: the app has
+#                  no inventory write access and cannot change stock
+#
+# Optional: swap read_orders for read_all_orders if you want to re-check
+# exceptions on orders older than 60 days (read_orders only covers the last 60).
+scopes = "read_orders,read_customers,read_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://advance-receipt-pro.onrender.com/auth/callback",
+  "https://advance-receipt-pro.onrender.com/auth/shopify/callback",
+  "https://advance-receipt-pro.onrender.com/api/auth/callback"
+]
 
 [webhooks]
 api_version = "2025-10"
@@ -29,21 +54,6 @@ uri = "/webhooks/refunds"
 [[webhooks.subscriptions]]
 topics = [ "app/uninstalled" ]
 uri = "/webhooks/app-uninstalled"
-
-[access_scopes]
-# read_orders  – detect the "Advance Adjusted" tender on POS orders
-# read_customers / write_customers – customer lookup + phone/email on receipts
-# read_products – look up what an advance is against (read-only; no inventory writes)
-scopes = "read_orders,read_customers,write_customers,read_products"
-optional_scopes = [ ]
-use_legacy_install_flow = false
-
-[auth]
-redirect_urls = [
-  "https://advance-receipt-pro.onrender.com/auth/callback",
-  "https://advance-receipt-pro.onrender.com/auth/shopify/callback",
-  "https://advance-receipt-pro.onrender.com/api/auth/callback"
-]
 
 [pos]
 embedded = true
