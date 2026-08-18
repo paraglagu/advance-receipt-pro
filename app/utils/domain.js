@@ -173,6 +173,24 @@ export function productSummary(receipt) {
 
 /* --------------------------- Receipt numbers ------------------------- */
 
+/**
+ * Indian financial year for a date, as "26-27" (1 April – 31 March).
+ * Receipt series conventionally restart each FY.
+ */
+export function indianFinancialYear(date = new Date()) {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  // getMonth() is 0-indexed, so April is 3.
+  const startYear = d.getMonth() >= 3 ? year : year - 1;
+  const twoDigit = (y) => String(y % 100).padStart(2, "0");
+  return `${twoDigit(startYear)}-${twoDigit(startYear + 1)}`;
+}
+
+/** e.g. "ADV-26-27-" → receipts read ADV-26-27-0001, ADV-26-27-0002, … */
+export function suggestedReceiptPrefix(date = new Date()) {
+  return `ADV-${indianFinancialYear(date)}-`;
+}
+
 export function formatReceiptNo(settings, n) {
   const padded = String(n).padStart(settings.receiptPadding || 4, "0");
   return `${settings.receiptPrefix || ""}${padded}${settings.receiptSuffix || ""}`;

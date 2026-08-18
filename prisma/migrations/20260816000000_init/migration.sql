@@ -32,7 +32,7 @@ CREATE TABLE "AdvanceSettings" (
     "storeEmail" TEXT,
     "storeGstin" TEXT,
     "logoUrl" TEXT,
-    "receiptPrefix" TEXT NOT NULL DEFAULT 'ADV-',
+    "receiptPrefix" TEXT NOT NULL DEFAULT 'ADV-26-27-',
     "receiptSuffix" TEXT NOT NULL DEFAULT '',
     "nextReceiptNo" INTEGER NOT NULL DEFAULT 1,
     "receiptPadding" INTEGER NOT NULL DEFAULT 4,

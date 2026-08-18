@@ -46,8 +46,10 @@ model AdvanceSettings {
   storeGstin     String?
   logoUrl        String?
 
-  // Receipt number series, e.g. ADV-0001/25-26
-  receiptPrefix  String  @default("ADV-")
+  // Receipt number series, e.g. ADV-26-27-0001
+  // Prefix carries the Indian financial year and is changed each April in
+  // Settings; see suggestedReceiptPrefix() in app/utils/domain.js.
+  receiptPrefix  String  @default("ADV-26-27-")
   receiptSuffix  String  @default("")
   nextReceiptNo  Int     @default(1)
   receiptPadding Int     @default(4)

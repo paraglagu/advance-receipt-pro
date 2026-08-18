@@ -26,7 +26,14 @@ import {
   pendingReceiptIds,
   primaryInboundTender,
 } from "../app/models/shopifyOrder.server";
-import { availablePaise, gatewayToMode, productSummary } from "../app/utils/domain";
+import {
+  availablePaise,
+  formatReceiptNo,
+  gatewayToMode,
+  indianFinancialYear,
+  productSummary,
+  suggestedReceiptPrefix,
+} from "../app/utils/domain";
 
 const SHOP = "test-shop.myshopify.com";
 const CUST = "555001";
@@ -74,7 +81,7 @@ async function main() {
     receiptDate: new Date("2026-06-10T10:00:00Z"),
   });
 
-  check("receipt numbers increment", `${r1.receiptNo},${r2.receiptNo}`, "ADV-0001,ADV-0002");
+  check("receipt numbers increment", `${r1.receiptNo},${r2.receiptNo}`, "ADV-26-27-0001,ADV-26-27-0002");
   check("balance after two advances", await getCustomerBalance(SHOP, CUST), 1_500_000);
 
   // Order tenders ₹12,000 against the advance.
@@ -541,6 +548,26 @@ async function main() {
     advanceTenderPaise({ transactions: [realPosTxn] }, posSet), 0);
   check("inbound tender detected from a real POS txn",
     primaryInboundTender({ transactions: [realPosTxn] }, posSet).mode, "CARD");
+  console.log("\n— receipt numbering: financial year format —");
+
+  const fy = (s) => indianFinancialYear(new Date(`${s}T06:00:00`));
+  check("mid-year", fy("2026-08-17"), "26-27");
+  check("first day of FY", fy("2026-04-01"), "26-27");
+  check("last day of previous FY", fy("2026-03-31"), "25-26");
+  check("January belongs to the FY that began last April", fy("2027-01-15"), "26-27");
+  check("next FY rolls over", fy("2027-04-01"), "27-28");
+  check("suggested prefix", suggestedReceiptPrefix(new Date("2026-08-17T06:00:00")), "ADV-26-27-");
+  check(
+    "full receipt number reads ADV-26-27-0001",
+    formatReceiptNo({ receiptPrefix: "ADV-26-27-", receiptSuffix: "", receiptPadding: 4 }, 1),
+    "ADV-26-27-0001",
+  );
+  check(
+    "and increments cleanly",
+    formatReceiptNo({ receiptPrefix: "ADV-26-27-", receiptSuffix: "", receiptPadding: 4 }, 42),
+    "ADV-26-27-0042",
+  );
+
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await prisma.$disconnect();
   process.exit(failed > 0 ? 1 : 0);

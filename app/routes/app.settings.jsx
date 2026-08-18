@@ -17,7 +17,7 @@ import {
 import { useCallback, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { getSettings, saveSettings } from "../models/settings.server";
-import { formatReceiptNo } from "../utils/domain";
+import { formatReceiptNo, suggestedReceiptPrefix } from "../utils/domain";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -125,6 +125,9 @@ export default function SettingsPage() {
     [],
   );
 
+  const fyPrefix = suggestedReceiptPrefix();
+  const currentFy = fyPrefix.replace(/^ADV-/, "").replace(/-$/, "");
+
   const preview = formatReceiptNo(
     {
       receiptPrefix: form.receiptPrefix,
@@ -202,7 +205,7 @@ export default function SettingsPage() {
                       autoComplete="off" error={errors.receiptPadding}
                     />
                     <TextField
-                      label="Suffix" name="receiptSuffix" placeholder="/26-27"
+                      label="Suffix" name="receiptSuffix" placeholder="optional"
                       value={form.receiptSuffix} onChange={set("receiptSuffix")}
                       autoComplete="off"
                     />
@@ -210,6 +213,24 @@ export default function SettingsPage() {
                   <Text as="p" tone="subdued" variant="bodySm">
                     Next receipt will be issued as <b>{preview}</b>. Numbers are never reused, and
                     two tills saving at the same moment can’t collide.
+                  </Text>
+                  {form.receiptPrefix !== fyPrefix && (
+                    <Banner tone="warning">
+                      <BlockStack gap="200">
+                        <Text as="p">
+                          The prefix doesn’t match the current Indian financial year. For
+                          FY {currentFy} it should be <b>{fyPrefix}</b>, giving{" "}
+                          {fyPrefix}0001, {fyPrefix}0002 and so on.
+                        </Text>
+                        <Button onClick={() => set("receiptPrefix")(fyPrefix)}>
+                          {`Use ${fyPrefix}`}
+                        </Button>
+                      </BlockStack>
+                    </Banner>
+                  )}
+                  <Text as="p" tone="subdued" variant="bodySm">
+                    Each April, set the prefix to the new financial year and reset
+                    “Next number” to 1 to start a fresh series.
                   </Text>
                 </BlockStack>
               </Card>

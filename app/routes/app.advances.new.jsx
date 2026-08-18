@@ -73,11 +73,16 @@ export const action = async ({ request }) => {
     errors.reference = "Enter the transaction reference for non-cash payments";
   }
 
+  // The field is pre-filled with today, so the common case is "today" and the
+  // receipt should carry the real time of day, not midnight. Backdating is
+  // still allowed; those get midday UTC, which keeps the printed date stable
+  // whichever timezone renders it.
+  const isToday = String(form.get("receiptDateIsToday") || "") === "1";
   let receiptDate = new Date();
-  if (receiptDateRaw) {
-    const parsedDate = new Date(receiptDateRaw);
+  if (receiptDateRaw && !isToday) {
+    const parsedDate = new Date(`${receiptDateRaw}T12:00:00Z`);
     if (isNaN(parsedDate.getTime())) errors.receiptDate = "Invalid date";
-    else if (parsedDate > new Date(Date.now() + 60_000)) {
+    else if (parsedDate > new Date(Date.now() + 86_400_000)) {
       errors.receiptDate = "Receipt date cannot be in the future";
     } else receiptDate = parsedDate;
   }
@@ -126,6 +131,13 @@ export const action = async ({ request }) => {
   return redirect(`/app/advances/${receipt.id}?created=1`);
 };
 
+/** Today as YYYY-MM-DD in the *browser's* timezone, for the date input. */
+function todayLocalISO() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export default function NewAdvancePage() {
   const { settings, nextReceiptNo, preset } = useLoaderData();
   const actionData = useActionData();
@@ -139,7 +151,9 @@ export default function NewAdvancePage() {
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [staffName, setStaffName] = useState("");
-  const [receiptDate, setReceiptDate] = useState("");
+  // Default to today. todayLocalISO() reads the browser clock, so a cashier in
+  // IST gets the Indian date rather than the server's UTC date.
+  const [receiptDate, setReceiptDate] = useState(() => todayLocalISO());
 
   // "What is this advance for?" — optional, reference only.
   const [productChoice, setProductChoice] = useState("none");
@@ -344,7 +358,7 @@ export default function NewAdvancePage() {
                       onChange={setReceiptDate}
                       autoComplete="off"
                       error={errors.receiptDate}
-                      helpText="Leave blank for today"
+                      helpText="Defaults to today. Change only to backdate."
                     />
                   </InlineGrid>
 
@@ -542,6 +556,11 @@ export default function NewAdvancePage() {
               <input type="hidden" name="productSku" value={selectedVariant?.sku || ""} />
               <input type="hidden" name="productTitleManual" value={productTitleManual} />
               <input type="hidden" name="productSpec" value={productSpec} />
+              <input
+                type="hidden"
+                name="receiptDateIsToday"
+                value={receiptDate === todayLocalISO() ? "1" : "0"}
+              />
 
               <InlineStack align="end" gap="200">
                 <Button url="/app/advances">Cancel</Button>
