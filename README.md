@@ -315,17 +315,57 @@ products — all read-only) and click **Install**.
 
 The app should now open inside your Shopify admin.
 
-## Step 7 — Create the two payment methods ⚠️ required
+## Step 7 — Create the POS custom payment types ⚠️ required
 
-In **Shopify admin → Settings → Payments → Manual payment methods → Create
-custom payment method**, add:
+**This is the POS channel, not the main Payments page.** Shopify keeps two
+separate sets of manual payment methods and they do not share entries:
+
+| Where | Used by | Relevant here? |
+| --- | --- | --- |
+| Settings → Payments → **Manual payment methods** | Online store checkout (bank deposit, money order, COD) | ✗ no |
+| **Point of Sale channel → Payment types → Custom payment** | The POS till | ✓ **yes** |
+
+Anything you add under Settings → Payments will never appear at the till, and
+POS custom payment types will never appear on the Payments page. If you already
+added your manual methods under the POS channel, you're in the right place.
+
+> **The Shopify admin display is misleading — ignore it.** On a POS order the
+> payment timeline shows `Gateway: Custom (POS)` for *every* custom payment
+> type, with the real name buried in the message ("Paid via Card Payment").
+> That looks like the individual names are lost. They aren't: the Admin API
+> returns the real name, and that's what this app reads. Verified on live order
+> GO#1508:
+>
+> ```
+> gateway:              "Card Payment"
+> formattedGateway:     "Card Payment"
+> manualPaymentGateway: true
+> ```
+>
+> So a POS custom payment type named `Advance Adjusted` matches correctly. There
+> is a regression test pinning this exact shape.
+
+In the **Point of Sale** sales channel settings, add a custom payment type:
 
 - **`Advance Adjusted`** — how customers spend their advance. **Without this,
   advances can be recorded but never redeemed.**
-- **`UPI`** — if you don't already have it, so UPI advances are tendered as UPI
+- **`UPI`** — if you don't already have one, so UPI advances are recorded as UPI
   rather than cash.
 
-The name must match what's in the app's Settings screen (matching ignores case).
+The name must match the app's **Settings → Custom payment method name(s)**.
+Matching ignores case and also succeeds on a partial match, so a till type
+called `Advance Adjusted (Store Credit)` still matches `Advance Adjusted`.
+
+### Confirm the real tender name after your first test
+
+The name Shopify records on the transaction isn't always character-for-character
+what you typed. After your first test order tendered against the advance, check
+what actually landed — in the app, **Order reconciliation** will show the order,
+and if it says *Not an advance order* the names don't match.
+
+If they don't match, change the name in the app's Settings to match the till
+rather than the other way round; it accepts a comma-separated list, so you can
+safely list several spellings.
 
 ## Step 8 — Fill in Settings
 

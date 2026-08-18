@@ -155,9 +155,11 @@ export default function SettingsPage() {
                   <Text as="h2" variant="headingMd">Redeeming advances at POS</Text>
                   <Banner tone="info">
                     <Text as="p">
-                      In Shopify admin go to <b>Settings → Payments → Manual payment methods</b> and
-                      add a custom payment method with exactly this name. At the POS till, tender
-                      the order with it for the amount the customer wants to use from their advance.
+                      Add this as a <b>custom payment type in your Point of Sale
+                      channel settings</b> — not under Settings → Payments, which only
+                      covers online checkout and never reaches the till. At the POS
+                      till, tender the order with it for the amount the customer wants
+                      to use from their advance.
                     </Text>
                   </Banner>
                   <TextField

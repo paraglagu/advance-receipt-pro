@@ -512,6 +512,35 @@ async function main() {
     false,
   );
 
+
+  console.log("\n— real POS custom-tender shape (from live order GO#1508) —");
+
+  // The Shopify admin displays "Gateway: Custom (POS)" for every POS custom
+  // payment type, which suggests the individual names are lost. They are not —
+  // the API returns the real name in `gateway`/`formattedGateway`. This test
+  // pins that down using the exact shape observed on a live order.
+  const realPosTxn = {
+    kind: "SALE",
+    status: "SUCCESS",
+    gateway: "Card Payment",
+    formattedGateway: "Card Payment",
+    manualPaymentGateway: true,
+    amountSet: { shopMoney: { amount: "900.0" } },
+  };
+  const posSet = { tenderNames: "Advance Adjusted" };
+
+  check("real POS custom tender is not the advance tender",
+    isAdvanceTender(posSet, realPosTxn.formattedGateway), false);
+  check("a POS type actually named Advance Adjusted matches",
+    isAdvanceTender(posSet, "Advance Adjusted"), true);
+  check("the admin's display label never matches by accident",
+    isAdvanceTender(posSet, "Custom (POS)"), false);
+  check("real POS tender maps to a payment mode",
+    gatewayToMode(realPosTxn.gateway), "CARD");
+  check("advance tender ignored as inbound money",
+    advanceTenderPaise({ transactions: [realPosTxn] }, posSet), 0);
+  check("inbound tender detected from a real POS txn",
+    primaryInboundTender({ transactions: [realPosTxn] }, posSet).mode, "CARD");
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await prisma.$disconnect();
   process.exit(failed > 0 ? 1 : 0);
