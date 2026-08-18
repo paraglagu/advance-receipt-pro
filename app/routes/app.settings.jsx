@@ -29,6 +29,10 @@ export const action = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const form = await request.formData();
   const str = (k) => String(form.get(k) ?? "").trim();
+  // Browsers submit "on" for a ticked box, but don't rely on that alone —
+  // an Auto-apply that silently reads as false stops every webhook
+  // reconciliation without any visible error.
+  const bool = (k) => ["on", "true", "1", "yes"].includes(str(k).toLowerCase());
 
   const nextReceiptNo = Number(form.get("nextReceiptNo"));
   const receiptPadding = Number(form.get("receiptPadding"));
@@ -65,10 +69,10 @@ export const action = async ({ request }) => {
     receiptPadding,
 
     pageSize: str("pageSize") || "THERMAL80",
-    showLogo: form.get("showLogo") === "on",
+    showLogo: bool("showLogo"),
 
     tenderNames: str("tenderNames"),
-    autoApply: form.get("autoApply") === "on",
+    autoApply: bool("autoApply"),
 
     declarationText: str("declarationText"),
     termsText: str("termsText"),

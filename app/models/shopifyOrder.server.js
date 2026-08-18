@@ -42,7 +42,6 @@ export async function fetchOrderForReconcile(admin, orderId) {
          }
          refunds(first: 30) {
            id
-           processedAt
            totalRefundedSet { shopMoney { amount } }
            refundLineItems(first: 50) {
              edges {
