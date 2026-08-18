@@ -541,6 +541,19 @@ of charging the customer twice. Same for refunds.
 **Receipt numbers can't collide.** The counter is bumped with a single atomic
 `UPDATE`, so two tills saving at the same instant get different numbers.
 
+**Shortfalls can be resolved without losing the record.** If a cashier tenders
+more against an advance than the customer actually has, the app allocates only
+what exists and flags the order **Short**. Once you have settled the difference
+another way — collected the balance in cash, refunded the order, written it off
+— use **Mark as resolved** with a note. The order keeps its real status and the
+note for audit, but drops off the exceptions list and out of the dashboard
+count. If the money later moves again, the resolution clears itself
+automatically, so a stale note can never hide a new discrepancy.
+
+Do **not** raise a second advance receipt to plug a shortfall: an advance is
+pre-payment for a future purchase, and applying one to an already-paid order
+would double-count the revenue.
+
 **Exceptions surface rather than fail silently.** An order tendered against an
 advance with no customer attached, or with insufficient credit, lands on the
 Order reconciliation screen with an explanation and a Re-check button.
@@ -574,7 +587,7 @@ ordering, webhook replay, partial release, cancellation, over-refund and
 over-apply guards, tender matching, split tenders, the product field, the full
 POS reserve → confirm lifecycle including abandoned carts and price edits, and
 POS refunds including the capped-at-unspent case), then restores the Postgres
-client. **88 assertions.**
+client. **123 assertions.**
 
 ## Local development
 

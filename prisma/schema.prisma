@@ -198,6 +198,13 @@ model ProcessedOrder {
   status         String   @default("NO_TENDER")
   message        String?
 
+  // Set when the merchant has dealt with a shortfall by other means. The
+  // row keeps its real status (PARTIAL/NO_BALANCE) for the audit trail; this
+  // just takes it off the exceptions list. Cleared automatically if the
+  // numbers move again, so a stale note can't hide a new problem.
+  resolvedAt     DateTime?
+  resolvedNote   String?
+
   orderDate      DateTime?
   processedAt    DateTime @default(now())
   updatedAt      DateTime @updatedAt

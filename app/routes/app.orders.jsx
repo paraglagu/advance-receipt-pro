@@ -11,6 +11,7 @@ import {
   InlineStack,
   Layout,
   Page,
+  Modal,
   Select,
   Text,
   TextField,
@@ -18,7 +19,12 @@ import {
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import { getSettings } from "../models/settings.server";
-import { listProcessedOrders, reconcileOrder } from "../models/allocation.server";
+import {
+  listProcessedOrders,
+  reconcileOrder,
+  reopenProcessedOrder,
+  resolveProcessedOrder,
+} from "../models/allocation.server";
 import {
   ORDER_STATUS,
   ORDER_STATUS_LABELS,
@@ -99,6 +105,22 @@ async function runAction({ shop, admin, form, intent }) {
     return json({ ok: `${shaped.orderName} reconciled.` });
   }
 
+  if (intent === "resolve") {
+    const result = await resolveProcessedOrder(
+      shop,
+      String(form.get("orderId") || ""),
+      String(form.get("resolveNote") || ""),
+    );
+    if (!result.ok) return json({ error: result.error }, { status: 400 });
+    return json({ ok: "Marked as resolved — off the exceptions list, still on record." });
+  }
+
+  if (intent === "reopen") {
+    const result = await reopenProcessedOrder(shop, String(form.get("orderId") || ""));
+    if (!result.ok) return json({ error: result.error }, { status: 400 });
+    return json({ ok: "Reopened — back on the exceptions list." });
+  }
+
   return json({ error: "Unknown action" }, { status: 400 });
 }
 
@@ -108,8 +130,13 @@ export default function OrdersPage() {
   const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [orderName, setOrderName] = useState("");
+  const [resolving, setResolving] = useState(null);
 
   const busy = navigation.state === "submitting";
+
+  // Only shortfalls and unmatched orders are worth resolving.
+  const needsAttention = (o) =>
+    ["PARTIAL", "NO_BALANCE", "NO_CUSTOMER"].includes(o.status);
 
   const rows = orders.map((o, index) => (
     <IndexTable.Row id={o.id} key={o.id} position={index}>
@@ -121,6 +148,15 @@ export default function OrdersPage() {
           <Text as="span">{o.customerName || "—"}</Text>
           {o.message && (
             <Text as="span" tone="subdued" variant="bodySm">{o.message}</Text>
+          )}
+          {o.resolvedAt && (
+            <Text as="span" tone="success" variant="bodySm">
+              {"Resolved " +
+                new Date(o.resolvedAt).toLocaleDateString("en-IN", {
+                  day: "2-digit", month: "short", year: "2-digit",
+                }) +
+                (o.resolvedNote ? " — " + o.resolvedNote : "")}
+            </Text>
           )}
         </BlockStack>
       </IndexTable.Cell>
@@ -147,14 +183,34 @@ export default function OrdersPage() {
         </Text>
       </IndexTable.Cell>
       <IndexTable.Cell>
-        <Badge tone={STATUS_TONE[o.status]}>{ORDER_STATUS_LABELS[o.status] || o.status}</Badge>
+        <BlockStack gap="050">
+          <Badge tone={o.resolvedAt ? undefined : STATUS_TONE[o.status]}>
+            {ORDER_STATUS_LABELS[o.status] || o.status}
+          </Badge>
+          {o.resolvedAt && <Badge tone="success">Resolved</Badge>}
+        </BlockStack>
       </IndexTable.Cell>
       <IndexTable.Cell>
-        <Form method="post">
-          <input type="hidden" name="intent" value="resync" />
-          <input type="hidden" name="orderId" value={o.orderId} />
-          <Button submit variant="plain" size="slim">Re-check</Button>
-        </Form>
+        <InlineStack gap="200" wrap={false}>
+          <Form method="post">
+            <input type="hidden" name="intent" value="resync" />
+            <input type="hidden" name="orderId" value={o.orderId} />
+            <Button submit variant="plain" size="slim">Re-check</Button>
+          </Form>
+          {o.resolvedAt ? (
+            <Form method="post">
+              <input type="hidden" name="intent" value="reopen" />
+              <input type="hidden" name="orderId" value={o.orderId} />
+              <Button submit variant="plain" size="slim">Reopen</Button>
+            </Form>
+          ) : (
+            needsAttention(o) && (
+              <Button variant="plain" size="slim" onClick={() => setResolving(o)}>
+                Resolve
+              </Button>
+            )
+          )}
+        </InlineStack>
       </IndexTable.Cell>
     </IndexTable.Row>
   ));
@@ -191,6 +247,8 @@ export default function OrdersPage() {
                       labelHidden
                       options={[
                         { label: "All except non-advance", value: "" },
+                        { label: "Needs attention (unresolved)", value: "UNRESOLVED" },
+                        { label: "Resolved", value: "RESOLVED" },
                         ...Object.keys(ORDER_STATUS)
                           .filter((k) => k !== "NO_TENDER")
                           .map((k) => ({ label: ORDER_STATUS_LABELS[k], value: k })),
@@ -289,6 +347,43 @@ export default function OrdersPage() {
           </BlockStack>
         </Layout.Section>
       </Layout>
+      <Modal
+        open={Boolean(resolving)}
+        onClose={() => setResolving(null)}
+        title={"Mark " + (resolving ? resolving.orderName : "order") + " as resolved"}
+      >
+        <Form method="post" onSubmit={() => setResolving(null)}>
+          <input type="hidden" name="intent" value="resolve" />
+          <input type="hidden" name="orderId" value={resolving ? resolving.orderId : ""} />
+          <Modal.Section>
+            <BlockStack gap="300">
+              <Text as="p" tone="subdued" variant="bodySm">
+                Use this once the shortfall has been dealt with another way — the balance
+                collected in cash, the order refunded, or the difference written off. The
+                order keeps its status and stays fully on record; it just stops showing up
+                as an exception.
+              </Text>
+              {resolving && resolving.message && (
+                <Banner tone="warning"><Text as="p">{resolving.message}</Text></Banner>
+              )}
+              <TextField
+                label="How was it settled?"
+                name="resolveNote"
+                autoComplete="off"
+                multiline={2}
+                placeholder="e.g. Collected the balance in cash at the counter"
+                helpText="Recommended — this is the only record of what happened."
+              />
+            </BlockStack>
+          </Modal.Section>
+          <Modal.Section>
+            <InlineStack align="end" gap="200">
+              <Button onClick={() => setResolving(null)}>Cancel</Button>
+              <Button submit variant="primary" loading={busy}>Mark as resolved</Button>
+            </InlineStack>
+          </Modal.Section>
+        </Form>
+      </Modal>
     </Page>
   );
 }

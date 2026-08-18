@@ -374,17 +374,75 @@ async function upsertProcessedOrder(shop, data) {
     message: data.message ?? null,
     orderDate: data.orderDate ?? null,
   };
-  return prisma.processedOrder.upsert({
+
+  const existing = await prisma.processedOrder.findUnique({
     where: { shop_orderId: { shop, orderId: data.orderId } },
-    update: payload,
-    create: { shop, orderId: data.orderId, ...payload },
   });
+
+  // A resolution refers to the shortfall as it stood when the merchant dealt
+  // with it. If the money has moved since, that judgement is stale — reopen it
+  // rather than let a note hide a new discrepancy.
+  if (existing?.resolvedAt) {
+    const numbersMoved =
+      existing.tenderPaise !== data.tenderPaise ||
+      existing.allocatedPaise !== data.allocatedPaise;
+    if (numbersMoved) {
+      payload.resolvedAt = null;
+      payload.resolvedNote = null;
+    }
+  }
+
+  if (existing) {
+    return prisma.processedOrder.update({
+      where: { shop_orderId: { shop, orderId: data.orderId } },
+      data: payload,
+    });
+  }
+  return prisma.processedOrder.create({
+    data: { shop, orderId: data.orderId, ...payload },
+  });
+}
+
+/** Takes a handled shortfall off the exceptions list, keeping the record. */
+export async function resolveProcessedOrder(shop, orderId, note) {
+  const existing = await prisma.processedOrder.findUnique({
+    where: { shop_orderId: { shop, orderId: String(orderId) } },
+  });
+  if (!existing) return { ok: false, error: 'Order not found' };
+  if (existing.resolvedAt) return { ok: false, error: 'Already resolved' };
+
+  await prisma.processedOrder.update({
+    where: { shop_orderId: { shop, orderId: String(orderId) } },
+    data: { resolvedAt: new Date(), resolvedNote: note || null },
+  });
+  return { ok: true };
+}
+
+/** Puts it back on the exceptions list. */
+export async function reopenProcessedOrder(shop, orderId) {
+  const existing = await prisma.processedOrder.findUnique({
+    where: { shop_orderId: { shop, orderId: String(orderId) } },
+  });
+  if (!existing) return { ok: false, error: 'Order not found' };
+  await prisma.processedOrder.update({
+    where: { shop_orderId: { shop, orderId: String(orderId) } },
+    data: { resolvedAt: null, resolvedNote: null },
+  });
+  return { ok: true };
 }
 
 export async function listProcessedOrders(shop, { page = 1, limit = 50, status = null } = {}) {
   const where = { shop };
-  if (status) where.status = status;
-  else where.status = { not: ORDER_STATUS.NO_TENDER };
+  if (status === 'RESOLVED') {
+    where.resolvedAt = { not: null };
+  } else if (status === 'UNRESOLVED') {
+    where.resolvedAt = null;
+    where.status = { in: [ORDER_STATUS.NO_CUSTOMER, ORDER_STATUS.NO_BALANCE, ORDER_STATUS.PARTIAL] };
+  } else if (status) {
+    where.status = status;
+  } else {
+    where.status = { not: ORDER_STATUS.NO_TENDER };
+  }
 
   const [total, orders] = await Promise.all([
     prisma.processedOrder.count({ where }),
@@ -403,6 +461,7 @@ export async function countExceptions(shop) {
   return prisma.processedOrder.count({
     where: {
       shop,
+      resolvedAt: null,
       status: { in: [ORDER_STATUS.NO_CUSTOMER, ORDER_STATUS.NO_BALANCE, ORDER_STATUS.PARTIAL] },
     },
   });

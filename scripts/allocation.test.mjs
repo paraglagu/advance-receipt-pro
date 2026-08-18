@@ -16,7 +16,14 @@ import {
   syncPosAdvanceRefund,
   listReceipts,
 } from "../app/models/receipt.server";
-import { reconcileOrder, releaseOrder, applyReceiptManually } from "../app/models/allocation.server";
+import {
+  reconcileOrder,
+  releaseOrder,
+  applyReceiptManually,
+  resolveProcessedOrder,
+  reopenProcessedOrder,
+  countExceptions,
+} from "../app/models/allocation.server";
 import { getCustomerBalance } from "../app/models/ledger.server";
 import { isAdvanceTender } from "../app/models/settings.server";
 import {
@@ -607,6 +614,66 @@ async function main() {
   check("the ₹10 receipt is now consumed",
     (await receiptById(tenRupees.id)).status, "CONSUMED");
 
+  console.log("\n— resolving a shortfall —");
+
+  const RES_ORDER = "9001";
+  const resCust = "555030";
+  const resReceipt = await createAdvanceReceipt(SHOP, {
+    customerId: resCust, customerName: "Shortfall Case",
+    amountPaise: 1000, mode: "CASH",
+  });
+  await reconcileOrder(SHOP, {
+    orderId: RES_ORDER, orderName: "#9001",
+    customerId: resCust, customerName: "Shortfall Case",
+    tenderPaise: 79900,
+  });
+
+  const beforeResolve = await countExceptions(SHOP);
+  const poRes = () => prisma.processedOrder.findUnique({
+    where: { shop_orderId: { shop: SHOP, orderId: RES_ORDER } },
+  });
+  check("starts as a shortfall", (await poRes()).status, "PARTIAL");
+
+  const resolved = await resolveProcessedOrder(SHOP, RES_ORDER, "Collected balance in cash");
+  check("resolve accepted", resolved.ok, true);
+  check("note stored", (await poRes()).resolvedNote, "Collected balance in cash");
+  check("status is preserved for the audit trail", (await poRes()).status, "PARTIAL");
+  check("drops off the exceptions count", await countExceptions(SHOP), beforeResolve - 1);
+
+  const twice = await resolveProcessedOrder(SHOP, RES_ORDER, "again");
+  check("cannot resolve twice", twice.ok, false);
+
+  // Re-running with unchanged numbers must not wipe the resolution.
+  await reconcileOrder(SHOP, {
+    orderId: RES_ORDER, orderName: "#9001",
+    customerId: resCust, customerName: "Shortfall Case",
+    tenderPaise: 79900,
+  });
+  check("survives an identical re-check", Boolean((await poRes()).resolvedAt), true);
+
+  // But if the money moves, the old judgement is stale and must reopen.
+  await createAdvanceReceipt(SHOP, {
+    customerId: resCust, customerName: "Shortfall Case",
+    amountPaise: 5000, mode: "CASH",
+  });
+  await reconcileOrder(SHOP, {
+    orderId: RES_ORDER, orderName: "#9001",
+    customerId: resCust, customerName: "Shortfall Case",
+    tenderPaise: 79900,
+  });
+  check("reopens when the numbers change", (await poRes()).resolvedAt, null);
+  check("stale note cleared too", (await poRes()).resolvedNote, null);
+  check("back on the exceptions list", await countExceptions(SHOP), beforeResolve);
+
+  await resolveProcessedOrder(SHOP, RES_ORDER, "settled");
+  const reopened = await reopenProcessedOrder(SHOP, RES_ORDER);
+  check("manual reopen works", reopened.ok, true);
+  check("reopen clears the flag", (await poRes()).resolvedAt, null);
+
+  check("resolving an unknown order fails cleanly",
+    (await resolveProcessedOrder(SHOP, "does-not-exist", "x")).ok, false);
+
+  void resReceipt;
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await prisma.$disconnect();
   process.exit(failed > 0 ? 1 : 0);
