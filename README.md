@@ -472,6 +472,26 @@ components. It talks to three endpoints, all authenticated with
 | `GET /api/pos/customers?q=` | customer search with current advance balance |
 | `POST /api/pos/advance` | reserve a pending advance, returns cart line title and price |
 | `GET /api/pos/receipt/:id` | poll for confirmation after tendering |
+| `GET /api/pos/balance/:customerId` | balance + unused receipts for the customer block |
+
+### Three targets
+
+| Target | What it does |
+| --- | --- |
+| `pos.home.tile.render` | "Take advance" tile on the smart grid |
+| `pos.home.modal.render` | the capture flow — customer, amount, what it's for |
+| `pos.customer-details.block.render` | **shows the customer's advance balance before tendering** |
+
+The customer block matters more than it looks. A POS custom payment type is a
+*dumb* manual tender: it has no idea what the customer's balance is, and will
+mark ₹799 as paid when only ₹10 of credit exists. There is no cart-level block
+target in POS, so the balance appears on the customer screen — tap the customer
+on the cart and it shows the balance, a warning not to tender more than it, and
+the unused receipts in the order they'll be spent.
+
+If the cashier over-tenders anyway, the app still protects the ledger: it
+allocates only what exists and flags the order as **Short** on Order
+reconciliation with the shortfall named.
 
 **Pending receipts.** Adding an advance to the cart parks a `PENDING` row with a
 placeholder number and **no ledger entry** — no credit exists until the money

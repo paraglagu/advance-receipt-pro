@@ -13,3 +13,7 @@ type = "ui_extension"
   [[extensions.targeting]]
   target = "pos.home.modal.render"
   module = "./src/Modal.jsx"
+
+  [[extensions.targeting]]
+  target = "pos.customer-details.block.render"
+  module = "./src/CustomerBlock.jsx"
