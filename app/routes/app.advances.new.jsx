@@ -101,32 +101,42 @@ export const action = async ({ request }) => {
       : String(form.get("productTitleManual") || "")
     ).trim() || null;
 
-  const receipt = await createAdvanceReceipt(shop, {
-    customerId,
-    customerName: customerName || "Customer",
-    customerPhone: String(form.get("customerPhone") || "").trim() || null,
-    customerEmail: String(form.get("customerEmail") || "").trim() || null,
-    amountPaise: parsed.paise,
-    mode,
-    reference,
-    note,
-    staffName,
-    receiptDate,
+  let receipt;
+  try {
+    receipt = await createAdvanceReceipt(shop, {
+      customerId,
+      customerName: customerName || "Customer",
+      customerPhone: String(form.get("customerPhone") || "").trim() || null,
+      customerEmail: String(form.get("customerEmail") || "").trim() || null,
+      amountPaise: parsed.paise,
+      mode,
+      reference,
+      note,
+      staffName,
+      receiptDate,
 
-    productListed: productListed && Boolean(productTitle),
-    productId: productListed ? String(form.get("productId") || "").trim() || null : null,
-    productVariantId: productListed
-      ? String(form.get("productVariantId") || "").trim() || null
-      : null,
-    productTitle: productChoice === "none" ? null : productTitle,
-    productVariantTitle: productListed
-      ? String(form.get("productVariantTitle") || "").trim() || null
-      : null,
-    productSku: productListed ? String(form.get("productSku") || "").trim() || null : null,
-    productSpec: productChoice === "none"
-      ? null
-      : String(form.get("productSpec") || "").trim() || null,
-  });
+      productListed: productListed && Boolean(productTitle),
+      productId: productListed ? String(form.get("productId") || "").trim() || null : null,
+      productVariantId: productListed
+        ? String(form.get("productVariantId") || "").trim() || null
+        : null,
+      productTitle: productChoice === "none" ? null : productTitle,
+      productVariantTitle: productListed
+        ? String(form.get("productVariantTitle") || "").trim() || null
+        : null,
+      productSku: productListed ? String(form.get("productSku") || "").trim() || null : null,
+      productSpec: productChoice === "none"
+        ? null
+        : String(form.get("productSpec") || "").trim() || null,
+    });
+
+  } catch (e) {
+    console.error("[new advance] failed:", e);
+    return json(
+      { errors: { save: `Could not save the advance — ${e.name || "Error"}: ${e.message}` } },
+      { status: 500 },
+    );
+  }
 
   return redirect(`/app/advances/${receipt.id}?created=1`);
 };

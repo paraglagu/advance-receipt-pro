@@ -568,6 +568,45 @@ async function main() {
     "ADV-26-27-0042",
   );
 
+  console.log("\n— replay of live order GO#1512 (manual reconcile) —");
+
+  // Exactly what shapeOrderForReconcile() produces for the real order, so a
+  // failure here reproduces what the merchant saw in the admin.
+  const live1512 = {
+    orderId: "6697209626658",
+    orderName: "GO#1512",
+    customerId: "8131354984482",
+    customerName: "Parag Lagu",
+    tenderPaise: 79900,
+    orderDate: new Date("2026-08-18T07:01:07Z"),
+    source: "MANUAL",
+  };
+
+  // (a) customer has no advance at all
+  await reconcileOrder(SHOP, live1512);
+  const po1512a = await prisma.processedOrder.findUnique({
+    where: { shop_orderId: { shop: SHOP, orderId: "6697209626658" } },
+  });
+  check("records the order even with no credit", Boolean(po1512a), true);
+  check("flagged NO_BALANCE", po1512a.status, "NO_BALANCE");
+  check("nothing allocated", po1512a.allocatedPaise, 0);
+
+  // (b) now give them a ₹10 advance and re-run, as the merchant would
+  const tenRupees = await createAdvanceReceipt(SHOP, {
+    customerId: "8131354984482", customerName: "Parag Lagu",
+    amountPaise: 1000, mode: "CASH",
+  });
+  await reconcileOrder(SHOP, live1512);
+  const po1512b = await prisma.processedOrder.findUnique({
+    where: { shop_orderId: { shop: SHOP, orderId: "6697209626658" } },
+  });
+  check("re-run picks up the new credit", po1512b.allocatedPaise, 1000);
+  check("flagged Short", po1512b.status, "PARTIAL");
+  check("shortfall named in the message", po1512b.message.includes("789.00"), true);
+  check("balance drained to zero", await getCustomerBalance(SHOP, "8131354984482"), 0);
+  check("the ₹10 receipt is now consumed",
+    (await receiptById(tenRupees.id)).status, "CONSUMED");
+
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await prisma.$disconnect();
   process.exit(failed > 0 ? 1 : 0);

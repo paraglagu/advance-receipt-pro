@@ -58,6 +58,18 @@ export const action = async ({ params, request }) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "");
 
+  // Surface the real reason in the banner rather than Remix's blank
+  // "Application Error" page.
+  try {
+    return await runReceiptAction({ params, shop, admin, form, intent });
+  } catch (e) {
+    console.error("[receipt action] failed:", e);
+    return json({ error: `${e.name || "Error"}: ${e.message}` }, { status: 500 });
+  }
+};
+
+async function runReceiptAction({ params, shop, admin, form, intent }) {
+
   if (intent === "void") {
     const result = await voidReceipt(shop, params.id, String(form.get("reason") || ""));
     if (!result.ok) return json({ error: result.error }, { status: 400 });
@@ -105,7 +117,7 @@ export const action = async ({ params, request }) => {
   }
 
   return json({ error: "Unknown action" }, { status: 400 });
-};
+}
 
 export default function ReceiptDetailPage() {
   const { receipt, settings, balancePaise, availableOnReceipt } = useLoaderData();

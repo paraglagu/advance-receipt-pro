@@ -52,6 +52,20 @@ export const action = async ({ request }) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "");
 
+  // Anything thrown below would otherwise render Remix's blank "Application
+  // Error" box, which tells the merchant nothing and tells us nothing either.
+  try {
+    return await runAction({ shop, admin, form, intent });
+  } catch (e) {
+    console.error("[order reconciliation] action failed:", e);
+    return json(
+      { error: `${e.name || "Error"}: ${e.message}` },
+      { status: 500 },
+    );
+  }
+};
+
+async function runAction({ shop, admin, form, intent }) {
   const settings = await getSettings(shop);
 
   if (intent === "resync") {
@@ -86,7 +100,7 @@ export const action = async ({ request }) => {
   }
 
   return json({ error: "Unknown action" }, { status: 400 });
-};
+}
 
 export default function OrdersPage() {
   const { settings, total, orders, status } = useLoaderData();
