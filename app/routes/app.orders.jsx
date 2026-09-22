@@ -30,6 +30,7 @@ import {
   ORDER_STATUS_LABELS,
   ORDER_STATUS_TONES,
 } from "../utils/domain";
+import { syncStoreCreditForShop } from "../models/storeCredit.server";
 import {
   fetchOrderForReconcile,
   findOrderByName,
@@ -80,6 +81,7 @@ async function runAction({ shop, admin, form, intent }) {
     if (!order) return json({ error: "Order not found in Shopify" }, { status: 400 });
     const shaped = shapeOrderForReconcile(order, settings);
     await reconcileOrder(shop, { ...shaped, source: "MANUAL" });
+    await syncStoreCreditForShop(admin, shop, shaped.customerId);
     return json({ ok: `Re-checked ${shaped.orderName}.` });
   }
 
@@ -102,6 +104,7 @@ async function runAction({ shop, admin, form, intent }) {
     }
 
     await reconcileOrder(shop, { ...shaped, source: "MANUAL" });
+    await syncStoreCreditForShop(admin, shop, shaped.customerId);
     return json({ ok: `${shaped.orderName} reconciled.` });
   }
 

@@ -237,6 +237,104 @@ export async function syncPosAdvanceRefund(shop, orderId, targetRefundPaise) {
   return { ok: true, applied: appliedTotal, shortfallPaise: shortfall };
 }
 
+/**
+ * Creates a confirmed advance from a POS order the cashier rang up by hand,
+ * using POS's built-in "Add custom sale" with a line titled "Advance received…".
+ *
+ * There is no extension tagging the cart, so the order itself is the only
+ * evidence. Idempotent on posOrderId: a replayed webhook finds the existing
+ * receipt and does nothing, so the customer is never credited twice.
+ */
+export async function createPosAdvanceFromOrder(shop, {
+  orderId,
+  orderName,
+  customerId,
+  customerName,
+  customerPhone,
+  customerEmail,
+  amountPaise,
+  mode,
+  gateway,
+  orderDate,
+  productTitle,
+}) {
+  if (!customerId || amountPaise <= 0) {
+    return { ok: false, error: "Needs a customer and a positive amount" };
+  }
+
+  const existing = await prisma.advanceReceipt.findFirst({
+    where: { shop, posOrderId: String(orderId), status: { not: RECEIPT_STATUS.VOID } },
+  });
+  if (existing) {
+    // Already captured. Keep the amount honest if the order was edited.
+    if (existing.amountPaise !== amountPaise && existing.appliedPaise === 0) {
+      const delta = amountPaise - existing.amountPaise;
+      await prisma.$transaction(async (tx) => {
+        await tx.advanceReceipt.update({
+          where: { id: existing.id },
+          data: { amountPaise },
+        });
+        await addLedgerEntry(tx, shop, {
+          customerId: existing.customerId,
+          customerName: existing.customerName,
+          type: LEDGER_TYPES.ADJUSTMENT,
+          amountPaise: delta,
+          receiptId: existing.id,
+          receiptNo: existing.receiptNo,
+          orderId: String(orderId),
+          orderName,
+          note: `Amount corrected on ${orderName}`,
+        });
+      });
+    }
+    return { ok: true, receipt: existing, alreadyCaptured: true };
+  }
+
+  const receiptNo = await claimNextReceiptNo(shop);
+  const receiptDate = orderDate || new Date();
+
+  const receipt = await prisma.$transaction(async (tx) => {
+    const created = await tx.advanceReceipt.create({
+      data: {
+        shop,
+        receiptNo,
+        customerId,
+        customerName: customerName || "Customer",
+        customerPhone: customerPhone || null,
+        customerEmail: customerEmail || null,
+        amountPaise,
+        mode: mode || "OTHER",
+        posGateway: gateway || null,
+        reference: orderName ? `POS ${orderName}` : null,
+        productTitle: productTitle || null,
+        status: RECEIPT_STATUS.OPEN,
+        source: "POS",
+        posOrderId: String(orderId),
+        posOrderName: orderName,
+        receiptDate,
+        confirmedAt: new Date(),
+      },
+    });
+
+    await addLedgerEntry(tx, shop, {
+      customerId,
+      customerName: customerName || "Customer",
+      type: LEDGER_TYPES.RECEIVED,
+      amountPaise,
+      receiptId: created.id,
+      receiptNo,
+      orderId: String(orderId),
+      orderName,
+      note: [`${created.mode} at POS`, orderName].filter(Boolean).join(" — "),
+      entryDate: receiptDate,
+    });
+
+    return created;
+  });
+
+  return { ok: true, receipt };
+}
+
 /** Cart abandoned, or the POS order was cancelled before it ever settled. */
 export async function discardPendingAdvance(shop, receiptId, reason) {
   const existing = await prisma.advanceReceipt.findUnique({ where: { id: receiptId } });

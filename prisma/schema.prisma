@@ -64,6 +64,12 @@ model AdvanceSettings {
   tenderNames    String  @default("Advance Adjusted")
   autoApply      Boolean @default(true)
 
+  // Mirror each customer's advance balance into their Shopify store credit
+  // account so the cashier can SEE it in POS. Payment still goes through the
+  // manual tender above, which costs nothing; redeeming native store credit
+  // attracts a third-party transaction fee on this shop.
+  mirrorStoreCredit Boolean @default(true)
+
   // Receipt copy
   declarationText String @default("Received with thanks the sum stated above as an advance against future purchase.")
   termsText       String @default("This advance is adjustable against any future purchase.\nNon-transferable. Valid subject to store policy.")

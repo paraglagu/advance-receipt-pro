@@ -23,6 +23,7 @@ import { getSettings, peekNextReceiptNo } from "../models/settings.server";
 import { createAdvanceReceipt } from "../models/receipt.server";
 import { getCustomerBalance } from "../models/ledger.server";
 import { getCustomer } from "../models/customer.server";
+import { syncStoreCreditForShop } from "../models/storeCredit.server";
 import { formatINR, parseAmount, PAYMENT_MODES } from "../utils/money";
 
 export const loader = async ({ request }) => {
@@ -49,7 +50,7 @@ export const loader = async ({ request }) => {
 };
 
 export const action = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
   const form = await request.formData();
 
@@ -137,6 +138,8 @@ export const action = async ({ request }) => {
       { status: 500 },
     );
   }
+
+  await syncStoreCreditForShop(admin, shop, receipt.customerId);
 
   return redirect(`/app/advances/${receipt.id}?created=1`);
 };

@@ -130,6 +130,20 @@ export function advanceLineTitle(customerName) {
 }
 
 /**
+ * Shopify's own store credit tender. We mirror balances into store credit for
+ * visibility and expect redemption via the manual tender, but if a cashier
+ * pays with native store credit anyway, it must still draw down the ledger or
+ * the two would silently diverge.
+ */
+export const NATIVE_STORE_CREDIT_GATEWAYS = ["store credit", "store_credit", "store-credit"];
+
+export function isNativeStoreCredit(gateway) {
+  const g = String(gateway || "").trim().toLowerCase();
+  if (!g) return false;
+  return NATIVE_STORE_CREDIT_GATEWAYS.some((n) => g === n || g.includes(n));
+}
+
+/**
  * Maps whatever POS called the tender onto our payment modes. Merchants name
  * their manual methods freely ("UPI", "PhonePe", "Google Pay"), so this is
  * deliberately fuzzy and falls back to OTHER rather than guessing wrong.

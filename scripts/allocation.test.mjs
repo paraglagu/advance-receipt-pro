@@ -14,6 +14,7 @@ import {
   confirmPosAdvance,
   discardPendingAdvance,
   syncPosAdvanceRefund,
+  createPosAdvanceFromOrder,
   listReceipts,
 } from "../app/models/receipt.server";
 import {
@@ -38,9 +39,11 @@ import {
   formatReceiptNo,
   gatewayToMode,
   indianFinancialYear,
+  isNativeStoreCredit,
   productSummary,
   suggestedReceiptPrefix,
 } from "../app/utils/domain";
+import { syncStoreCredit } from "../app/models/storeCredit.server";
 
 const SHOP = "test-shop.myshopify.com";
 const CUST = "555001";
@@ -674,6 +677,140 @@ async function main() {
     (await resolveProcessedOrder(SHOP, "does-not-exist", "x")).ok, false);
 
   void resReceipt;
+  console.log("\n— store credit mirror —");
+
+  // A stand-in for the Shopify Admin client that remembers a balance, so the
+  // delta logic can be driven without touching a real store.
+  function fakeAdmin({ balancePaise = 0, hasAccount = true, failWith = null } = {}) {
+    const state = { balancePaise, hasAccount, calls: [] };
+    state.graphqlCount = 0;
+    return {
+      state,
+      graphql: async (query, opts) => {
+        state.graphqlCount++;
+        const vars = (opts && opts.variables) || {};
+        if (query.includes("CustomerStoreCredit")) {
+          return { json: async () => ({ data: { customer: {
+            id: vars.id,
+            storeCreditAccounts: { edges: state.hasAccount ? [{ node: {
+              id: "gid://shopify/StoreCreditAccount/1",
+              balance: { amount: (state.balancePaise / 100).toFixed(2), currencyCode: "INR" },
+            } }] : [] },
+          } } }) };
+        }
+        if (query.includes("CreditStoreCredit")) {
+          if (failWith) {
+            return { json: async () => ({ data: { storeCreditAccountCredit: {
+              userErrors: [{ message: failWith }] } } }) };
+          }
+          const add = Math.round(Number(vars.creditInput.creditAmount.amount) * 100);
+          state.calls.push(["credit", add]);
+          state.balancePaise += add;
+          state.hasAccount = true;
+          return { json: async () => ({ data: { storeCreditAccountCredit: { userErrors: [] } } }) };
+        }
+        if (query.includes("DebitStoreCredit")) {
+          const sub = Math.round(Number(vars.debitInput.debitAmount.amount) * 100);
+          state.calls.push(["debit", sub]);
+          state.balancePaise -= sub;
+          return { json: async () => ({ data: { storeCreditAccountDebit: { userErrors: [] } } }) };
+        }
+        throw new Error("unexpected query");
+      },
+    };
+  }
+
+  const SC_CUST = "555040";
+  await createAdvanceReceipt(SHOP, {
+    customerId: SC_CUST, customerName: "Mirror Test",
+    amountPaise: 1_500_000, mode: "CASH",
+  });
+
+  // Shopify starts at zero, ledger says ₹15,000 — credit the difference.
+  const a1 = fakeAdmin({ balancePaise: 0, hasAccount: false });
+  const sc1 = await syncStoreCredit(a1, SHOP, SC_CUST);
+  check("credits up to the ledger", sc1.action, "credit");
+  check("credits exactly the gap", sc1.deltaPaise, 1_500_000);
+  check("shopify now matches", a1.state.balancePaise, 1_500_000);
+
+  // Running again must be a no-op — this is what makes webhook replay safe.
+  const sc2 = await syncStoreCredit(a1, SHOP, SC_CUST);
+  check("second run does nothing", sc2.action, "none");
+  check("no extra mutation", a1.state.calls.length, 1);
+
+  // Spend ₹10,000 of it; the mirror must come down by the same amount.
+  await reconcileOrder(SHOP, {
+    orderId: "9500", orderName: "#9500",
+    customerId: SC_CUST, customerName: "Mirror Test",
+    tenderPaise: 1_000_000,
+  });
+  const sc3 = await syncStoreCredit(a1, SHOP, SC_CUST);
+  check("debits after redemption", sc3.action, "debit");
+  check("debits the gap", sc3.deltaPaise, -1_000_000);
+  check("mirror tracks the ledger", a1.state.balancePaise, 500_000);
+
+  // Drift in the other direction (someone redeemed natively) self-heals.
+  a1.state.balancePaise = 0;
+  const sc4 = await syncStoreCredit(a1, SHOP, SC_CUST);
+  check("self-heals downward drift", sc4.action, "credit");
+  check("restores the true balance", a1.state.balancePaise, 500_000);
+
+  // Never debit more than Shopify actually holds.
+  const a2 = fakeAdmin({ balancePaise: 100 });
+  await syncStoreCredit(a2, SHOP, "555041");  // no ledger => target 0
+  check("debit capped at what exists", a2.state.balancePaise, 0);
+
+  // A Shopify-side failure must not throw — the ledger has to stand alone.
+  const a3 = fakeAdmin({ balancePaise: 0, hasAccount: false, failWith: "Store credit is disabled" });
+  const sc5 = await syncStoreCredit(a3, SHOP, SC_CUST);
+  check("failure is captured, not thrown", sc5.ok, false);
+  check("failure reports the reason", sc5.error, "Store credit is disabled");
+
+  const sc6 = await syncStoreCredit(a1, SHOP, SC_CUST, { enabled: false });
+  check("respects the off switch", sc6.skipped, "disabled");
+  const sc7 = await syncStoreCredit(a1, SHOP, null);
+  check("no customer, no call", sc7.skipped, "no-admin-or-customer");
+
+  console.log("\n— native store credit still reconciles —");
+  check("recognises store credit", isNativeStoreCredit("Store credit"), true);
+  check("recognises snake_case", isNativeStoreCredit("store_credit"), true);
+  check("not confused by card", isNativeStoreCredit("Card Payment"), false);
+  check("not confused by our tender", isNativeStoreCredit("Advance Adjusted"), false);
+  check(
+    "native store credit counts as an advance tender",
+    isAdvanceTender({ tenderNames: "Advance Adjusted" }, "Store credit"),
+    true,
+  );
+  console.log("\n— advance rung up by hand at POS (no extension) —");
+
+  const manualArgs = {
+    orderId: "9700", orderName: "#9700",
+    customerId: "555050", customerName: "Walk In",
+    customerPhone: "+919999999999",
+    amountPaise: 2_500_00,
+    mode: "CASH", gateway: "Cash",
+    orderDate: new Date("2026-09-22T10:00:00Z"),
+  };
+
+  const m1 = await createPosAdvanceFromOrder(SHOP, manualArgs);
+  check("captured from the order alone", m1.ok, true);
+  check("real receipt number issued", m1.receipt.receiptNo.startsWith("ADV-"), true);
+  check("marked as coming from POS", m1.receipt.source, "POS");
+  check("linked to the order", m1.receipt.posOrderId, "9700");
+  check("credit granted", await getCustomerBalance(SHOP, "555050"), 2_500_00);
+
+  // Webhook replay: orders/create, orders/paid, retry.
+  const m2 = await createPosAdvanceFromOrder(SHOP, manualArgs);
+  check("replay is a no-op", m2.alreadyCaptured, true);
+  check("no double credit", await getCustomerBalance(SHOP, "555050"), 2_500_00);
+
+  // Cashier edited the order afterwards.
+  await createPosAdvanceFromOrder(SHOP, { ...manualArgs, amountPaise: 3_000_00 });
+  check("amount correction follows the order", await getCustomerBalance(SHOP, "555050"), 3_000_00);
+
+  const m3 = await createPosAdvanceFromOrder(SHOP, { ...manualArgs, orderId: "9701", customerId: null });
+  check("refuses without a customer", m3.ok, false);
+
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await prisma.$disconnect();
   process.exit(failed > 0 ? 1 : 0);

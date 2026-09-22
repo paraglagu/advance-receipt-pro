@@ -73,6 +73,7 @@ export const action = async ({ request }) => {
 
     tenderNames: str("tenderNames"),
     autoApply: bool("autoApply"),
+    mirrorStoreCredit: bool("mirrorStoreCredit"),
 
     declarationText: str("declarationText"),
     termsText: str("termsText"),
@@ -117,6 +118,7 @@ export default function SettingsPage() {
 
     tenderNames: settings.tenderNames || "",
     autoApply: Boolean(settings.autoApply),
+    mirrorStoreCredit: Boolean(settings.mirrorStoreCredit),
 
     declarationText: settings.declarationText || "",
     termsText: settings.termsText || "",
@@ -185,6 +187,39 @@ export default function SettingsPage() {
                     onChange={set("autoApply")}
                     helpText="Turn off only if you want to reconcile every order by hand."
                   />
+                </BlockStack>
+              </Card>
+
+              {/* ---------- Store credit mirror ---------- */}
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">Showing the balance in POS</Text>
+                  <Checkbox
+                    label="Mirror advance balances into Shopify store credit"
+                    name="mirrorStoreCredit"
+                    checked={form.mirrorStoreCredit}
+                    onChange={set("mirrorStoreCredit")}
+                    helpText="Keeps each customer's Shopify store credit equal to their advance balance, so the cashier sees it in POS when they add the customer."
+                  />
+                  <Banner tone="warning">
+                    <BlockStack gap="200">
+                      <Text as="p">
+                        This is for <b>visibility only</b>. Keep tendering with
+                        “{form.tenderNames}” — that costs nothing. Paying with Shopify’s
+                        own <b>Store credit</b> tender attracts a third-party transaction
+                        fee on this store, so avoid it at the till.
+                      </Text>
+                      <Text as="p" variant="bodySm">
+                        If store credit does get used, the advance is still drawn down
+                        correctly — you just pay the fee.
+                      </Text>
+                    </BlockStack>
+                  </Banner>
+                  <Text as="p" tone="subdued" variant="bodySm">
+                    This app’s ledger stays the source of truth. The mirror is
+                    recalculated from it after every change, so any drift corrects
+                    itself and a Shopify-side failure never affects the ledger.
+                  </Text>
                 </BlockStack>
               </Card>
 

@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { formatReceiptNo } from "../utils/domain";
+import { formatReceiptNo, isNativeStoreCredit } from "../utils/domain";
 
 export { formatReceiptNo };
 
@@ -54,6 +54,9 @@ export function tenderNameList(settings) {
 
 export function isAdvanceTender(settings, gatewayName) {
   if (!gatewayName) return false;
+  // Native store credit always counts, whether or not it's in the list — see
+  // isNativeStoreCredit() for why.
+  if (isNativeStoreCredit(gatewayName)) return true;
   const needle = String(gatewayName).trim().toLowerCase();
   return tenderNameList(settings).some(
     (name) => needle === name || needle.includes(name),

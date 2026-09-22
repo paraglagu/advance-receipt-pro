@@ -14,15 +14,17 @@ on Render), but a separate app with its own database.
 **1. Customer pays upfront.** They hand over ₹15,000 in cash or by UPI against a
 tent you'll order in for them.
 
-**2. You take it at the till.** Tap the **Take advance** tile on the POS smart
-grid, pick the customer, enter the amount and what it's for. The extension drops
-a **non-taxable line** onto the POS cart — "Advance received — Ramesh K,
-₹15,000" — and you tender it as Cash or UPI exactly like any other sale.
+**2. You take it at the till.** Add the customer to the POS cart, then use POS's
+own **Add custom sale** with the title starting `Advance received` and the
+amount. Mark it **not taxable**. Tender it as Cash or UPI like any other sale.
+
+The app spots that line on the order and issues the receipt automatically — no
+custom POS extension involved.
 
 Because it goes through the POS cart, **the money lands in that day's collections
 and the cash drawer**, split by the tender the cashier actually used. Once the
 order settles, the app issues receipt `ADV-0001`, credits the customer, and the
-receipt prints to the counter printer straight from POS.
+receipt is ready to print from the app.
 
 You can also record an advance from the admin app when someone pays by bank
 transfer or over the phone.
@@ -170,17 +172,20 @@ one — that's expected.
 
 ### What it asks for, and why
 
-The app issues **no GraphQL mutations at all**. It is entirely read-only against
-Shopify; everything it writes lives in its own database.
+Apart from writing store credit (see below), the app is read-only against
+Shopify; everything else it records lives in its own database.
 
 | Scope | Why |
 | --- | --- |
 | `read_orders` | Read order tenders, line items, refunds and cart attributes — how advances get confirmed, redeemed and refunded |
 | `read_customers` | Customer lookup for the picker; ledgers key off the customer id |
 | `read_products` | The "what is this advance for?" picker |
+| `read_store_credit_accounts` + `read_store_credit_account_transactions` | Read the customer's current store credit so the mirror can compute a delta |
+| `write_store_credit_account_transactions` | Keep store credit equal to the advance balance, for POS visibility |
 
-**No write scopes, and no inventory access** — the app cannot change stock,
-customers, products or orders even if it tried.
+**The only write access is store credit**, used purely to mirror the advance
+balance so POS can display it. The app cannot change stock, customers, products
+or orders.
 
 The POS extension's cart actions (`addCustomSale`, `setCustomer`) are POS
 operations, not Admin API calls, so they need no scope of their own.
@@ -461,61 +466,73 @@ installation will prompt to approve the corrected scopes.
 
 ---
 
-## The POS extension
+## Showing the balance in POS
 
-`extensions/pos-advance/` — a tile plus a modal, built with Preact and POS web
-components. It talks to three endpoints, all authenticated with
-`authenticate.public.pos()`:
+The cashier needs to know the customer's advance balance *before* choosing how
+much to tender, because a POS custom payment type has no balance awareness — it
+will mark ₹799 as paid when only ₹10 of credit exists.
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /api/pos/customers?q=` | customer search with current advance balance |
-| `POST /api/pos/advance` | reserve a pending advance, returns cart line title and price |
-| `GET /api/pos/receipt/:id` | poll for confirmation after tendering |
-| `GET /api/pos/balance/:customerId` | balance + unused receipts for the customer block |
+This is solved by **mirroring the balance into Shopify store credit**. POS shows
+store credit natively on the customer, so the cashier sees it without any custom
+UI.
 
-### Three targets
+### Visibility only — do not pay with it
 
-| Target | What it does |
-| --- | --- |
-| `pos.home.tile.render` | "Take advance" tile on the smart grid |
-| `pos.home.modal.render` | the capture flow — customer, amount, what it's for |
-| `pos.customer-details.block.render` | **shows the customer's advance balance before tendering** |
+| | Use | Cost |
+| --- | --- | --- |
+| **Store credit** | Seeing the balance in POS | — |
+| **"Advance Adjusted" tender** | Taking the payment | free |
+| Shopify's own *Store credit* tender | avoid | third-party transaction fee |
 
-The customer block matters more than it looks. A POS custom payment type is a
-*dumb* manual tender: it has no idea what the customer's balance is, and will
-mark ₹799 as paid when only ₹10 of credit exists. There is no cart-level block
-target in POS, so the balance appears on the customer screen — tap the customer
-on the cart and it shows the balance, a warning not to tender more than it, and
-the unused receipts in the order they'll be spent.
+This store was created after 12 May 2025 and is not Plus, so orders paid with
+Shopify store credit attract a third-party transaction fee on the credited
+amount. The manual tender attracts none. That is the whole reason the two are
+split.
 
-If the cashier over-tenders anyway, the app still protects the ledger: it
-allocates only what exists and flags the order as **Short** on Order
-reconciliation with the shortfall named.
+If a cashier pays with native store credit anyway, nothing breaks — the app
+treats it as an advance tender and draws the ledger down correctly. You just pay
+the fee.
 
-**Pending receipts.** Adding an advance to the cart parks a `PENDING` row with a
-placeholder number and **no ledger entry** — no credit exists until the money
-does. The order webhook confirms it, assigns the real receipt number, and reads
-the payment mode from the tender actually used. Abandon the cart and nothing is
-credited and no number is burned, so the series has no gaps. If the cashier
-edits the price in the cart, the order wins over the reservation.
+### How the mirror behaves
 
-### Two things to verify on a real device
+This app's ledger is the source of truth. After every change to a customer's
+balance, the app reads Shopify's store credit balance and moves only the
+*difference*. That makes it:
 
-The docs wouldn't pin these down, so they're written defensively rather than
-guessed:
+- **idempotent** — running it twice changes nothing the second time, so webhook
+  replays are safe
+- **self-healing** — drift from any cause corrects on the next sync, including
+  someone redeeming store credit natively
+- **non-fatal** — if Shopify rejects the call, it is logged and the ledger is
+  untouched. Taking money never depends on the mirror working.
 
-1. **`APP_URL`** at the top of `src/Modal.jsx` — set in Step 5 above.
-2. **The Session API method name.** `sessionToken()` probes the shapes it ships
-   as and throws a clear error if none match, rather than failing silently.
+Turn it off under **Settings → Showing the balance in POS**. It needs the
+`read_store_credit_accounts`, `read_store_credit_account_transactions` and
+`write_store_credit_account_transactions` scopes — the app's only write access.
 
-The `<s-tile>` / `<s-page>` / `<s-scroll-box>` / `<s-text>` syntax is verbatim
-from Shopify's docs. The rest (`s-search-field`, `s-number-field`,
-`s-clickable`, `s-banner`, `s-badge`) follow the documented naming convention
-but should be checked against a `shopify app generate extension` scaffold. Run
-`npx shopify app dev` and preview on a POS device.
+### Prerequisites
 
----
+- **New customer accounts** must be enabled (this store already has them)
+- Store credit must be enabled as a payment option in **Customer accounts
+  settings**; Shopify won't show it in POS otherwise, and it cannot be enabled
+  for POS without also being on for the online store
+- Staff need the **Customers** POS role permission to see it
+
+### Why there is no custom POS extension
+
+There was one — a tile plus a customer-details block. It compiled and deployed
+cleanly but never rendered on the device, failing identically even when reduced
+to Shopify's own verbatim example. Since `shopify app dev` only previews against
+development stores, and this app uses custom distribution (so it installs only on
+the live store), there was no way to get a console on the failure.
+
+The store credit mirror achieves the same goal using native POS behaviour, with
+nothing to debug. The extension was removed; it is recoverable from git history
+if ever needed.
+
+Taking an advance at the till still works — use the app's own tile on the smart
+grid, which runs the full app inside POS.
+
 
 ## Things worth knowing
 
@@ -585,9 +602,10 @@ npm test
 Spins up a throwaway SQLite database, exercises the draw-down engine (FIFO
 ordering, webhook replay, partial release, cancellation, over-refund and
 over-apply guards, tender matching, split tenders, the product field, the full
-POS reserve → confirm lifecycle including abandoned carts and price edits, and
-POS refunds including the capped-at-unspent case), then restores the Postgres
-client. **123 assertions.**
+POS reserve → confirm lifecycle including abandoned carts and price edits,
+POS refunds including the capped-at-unspent case, and the store credit mirror
+including drift self-healing and Shopify-side failure), then restores the Postgres
+client. **152 assertions.**
 
 ## Local development
 

@@ -24,6 +24,7 @@ import { getReceipt, refundReceipt, voidReceipt } from "../models/receipt.server
 import { getCustomerBalance } from "../models/ledger.server";
 import { applyReceiptManually, releaseAllocation } from "../models/allocation.server";
 import { findOrderByName } from "../models/shopifyOrder.server";
+import { syncStoreCreditForShop } from "../models/storeCredit.server";
 import {
   availablePaise,
   productSummary,
@@ -61,7 +62,11 @@ export const action = async ({ params, request }) => {
   // Surface the real reason in the banner rather than Remix's blank
   // "Application Error" page.
   try {
-    return await runReceiptAction({ params, shop, admin, form, intent });
+    const result = await runReceiptAction({ params, shop, admin, form, intent });
+    // Any of void / refund / apply / release moves the balance.
+    const receipt = await getReceipt(shop, params.id);
+    if (receipt) await syncStoreCreditForShop(admin, shop, receipt.customerId);
+    return result;
   } catch (e) {
     console.error("[receipt action] failed:", e);
     return json({ error: `${e.name || "Error"}: ${e.message}` }, { status: 500 });

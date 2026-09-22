@@ -2,6 +2,7 @@ import { authenticate } from "../shopify.server";
 import { getSettings } from "../models/settings.server";
 import { syncPosAdvanceRefund } from "../models/receipt.server";
 import { reconcileOrder } from "../models/allocation.server";
+import { syncStoreCreditForShop } from "../models/storeCredit.server";
 import {
   advanceRefundPaise,
   fetchOrderForReconcile,
@@ -35,6 +36,8 @@ export const action = async ({ request }) => {
     if (settings.autoApply) {
       await reconcileOrder(shop, { ...shaped, source: "WEBHOOK" });
     }
+
+    await syncStoreCreditForShop(admin, shop, shaped.customerId);
   } catch (e) {
     console.error(`[webhook ${topic}] refund on order ${orderId} failed:`, e.message);
   }
