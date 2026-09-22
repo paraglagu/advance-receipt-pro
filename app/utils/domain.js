@@ -123,6 +123,18 @@ export const CART_ATTR_RECEIPT_IDS = "_advance_receipt_ids";
 /** Title of the custom-sale line the extension drops into the POS cart. */
 export const ADVANCE_LINE_PREFIX = "Advance received";
 
+/**
+ * Does this POS line represent an advance being taken?
+ *
+ * Deliberately forgiving: a cashier types this by hand into POS's
+ * "Add custom sale", so case and surrounding spaces must not decide whether
+ * the customer gets their money recorded.
+ */
+export function isAdvanceLineTitle(title) {
+  return String(title || "").trim().toLowerCase()
+    .startsWith(ADVANCE_LINE_PREFIX.toLowerCase());
+}
+
 export function advanceLineTitle(customerName) {
   return customerName
     ? `${ADVANCE_LINE_PREFIX} — ${customerName}`

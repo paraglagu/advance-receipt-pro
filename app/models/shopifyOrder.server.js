@@ -1,7 +1,7 @@
 import {
-  ADVANCE_LINE_PREFIX,
   CART_ATTR_RECEIPT_IDS,
   gatewayToMode,
+  isAdvanceLineTitle,
 } from "../utils/domain";
 import { toPaise } from "../utils/money";
 import { numericId } from "./customer.server";
@@ -117,7 +117,7 @@ export function pendingReceiptIds(order) {
 export function advanceLinePaise(order) {
   const edges = order?.lineItems?.edges || [];
   return edges
-    .filter((e) => String(e.node.title || "").startsWith(ADVANCE_LINE_PREFIX))
+    .filter((e) => isAdvanceLineTitle(e.node.title))
     .reduce((sum, e) => sum + toPaise(e.node.originalTotalSet?.shopMoney?.amount), 0);
 }
 
@@ -163,7 +163,7 @@ export function advanceRefundPaise(order) {
   const lineEdges = order?.lineItems?.edges || [];
   const orderIsOnlyAdvance =
     lineEdges.length > 0 &&
-    lineEdges.every((e) => String(e.node.title || "").startsWith(ADVANCE_LINE_PREFIX));
+    lineEdges.every((e) => isAdvanceLineTitle(e.node.title));
 
   let total = 0;
 
@@ -180,7 +180,7 @@ export function advanceRefundPaise(order) {
     }
 
     for (const e of items) {
-      if (String(e.node.lineItem?.title || "").startsWith(ADVANCE_LINE_PREFIX)) {
+      if (isAdvanceLineTitle(e.node.lineItem?.title)) {
         total += toPaise(e.node.subtotalSet?.shopMoney?.amount);
       }
     }

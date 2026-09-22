@@ -39,6 +39,7 @@ import {
   formatReceiptNo,
   gatewayToMode,
   indianFinancialYear,
+  isAdvanceLineTitle,
   isNativeStoreCredit,
   productSummary,
   suggestedReceiptPrefix,
@@ -810,6 +811,23 @@ async function main() {
 
   const m3 = await createPosAdvanceFromOrder(SHOP, { ...manualArgs, orderId: "9701", customerId: null });
   check("refuses without a customer", m3.ok, false);
+
+  console.log("\n— the cashier types the line title by hand —");
+
+  const titled = (t) => advanceLinePaise({
+    lineItems: { edges: [{ node: { title: t, originalTotalSet: { shopMoney: { amount: "500.00" } } } }] },
+  });
+  check("exact", titled("Advance received"), 50_000);
+  check("with a customer name", titled("Advance received — Ramesh K"), 50_000);
+  check("capitalised differently", titled("Advance Received"), 50_000);
+  check("all caps", titled("ADVANCE RECEIVED for tent"), 50_000);
+  check("lower case", titled("advance received"), 50_000);
+  check("leading space", titled("  Advance received"), 50_000);
+  check("a real product is not an advance", titled("Advance Trekking Pole"), 0);
+  check("unrelated product", titled("CTR Trekking Shoes"), 0);
+  check("empty title", titled(""), 0);
+  check("isAdvanceLineTitle direct", isAdvanceLineTitle("ADVANCE RECEIVED"), true);
+  check("isAdvanceLineTitle rejects", isAdvanceLineTitle("Advanced course"), false);
 
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await prisma.$disconnect();
